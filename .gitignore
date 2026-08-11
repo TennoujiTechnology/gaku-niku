@@ -45,3 +45,5 @@ yarn-error.log*
 /promo/render/
 /promo/assets/scene-*.svg
 /promo/assets/screen-*.png
+/promo/ui-guide/render/
+/promo/ui-guide/assets/scene-*.svg

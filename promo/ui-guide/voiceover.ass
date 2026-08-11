@@ -1,0 +1,20 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Voice,Hiragino Sans GB,38,&H00FFFFFF,&H000000FF,&H00111B2C,&H8808111F,-1,0,0,0,100,100,0,0,3,2,0,2,150,150,36,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.40,0:00:05.40,Voice,,0,0,0,,自学型熟肉机的界面，按准备、翻译、精修三步推进
+Dialogue: 0,0:00:05.40,0:00:12.20,Voice,,0,0,0,,把 B 站、YouTube 链接或本地视频放进来\N选择输出目录、画质和字幕格式
+Dialogue: 0,0:00:12.20,0:00:18.80,Voice,,0,0,0,,填写作品和角色关键词，指定搜索网站\N再选择 API、本地 Agent CLI 或显存模型
+Dialogue: 0,0:00:18.80,0:00:31.30,Voice,,0,0,0,,Harness 按八个阶段自动推进\N从获取素材一直到封装和最终验证
+Dialogue: 0,0:00:31.30,0:00:37.80,Voice,,0,0,0,,边看视频边拖动时间轴\N设置角色应援色、字号、描边和发光
+Dialogue: 0,0:00:37.80,0:00:44.80,Voice,,0,0,0,,逐句修改说话人、起止时间、原文和译文\N疑点还能跳回画面做 OCR
+Dialogue: 0,0:00:44.80,0:00:49.70,Voice,,0,0,0,,先准备证据，再让 Agent 翻译\N最后由人逐句把关
