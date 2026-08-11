@@ -1,0 +1,4 @@
+interface:
+  display_name: "精准视频字幕翻译"
+  short_description: "研究作品语境并精校翻译、封装 B站、YouTube 或本地视频字幕"
+  default_prompt: "Use $precision-video-subtitles to research the work, translate this video accurately into Chinese subtitles, and mux the result."
