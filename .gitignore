@@ -47,3 +47,6 @@ yarn-error.log*
 /promo/assets/screen-*.png
 /promo/ui-guide/render/
 /promo/ui-guide/assets/scene-*.svg
+/promo/ui-motion/render/
+/promo/ui-motion/assets/*.svg
+/promo/ui-motion/assets/*.png
