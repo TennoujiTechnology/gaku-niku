@@ -26,6 +26,8 @@ Gaku-Niku 是一台会做功课的本地熟肉机。给它一段 Bilibili、YouT
 
 它只启动一个 Node 进程，同时提供界面、视频流和本地 Agent 桥。浏览器会自动打开 `http://127.0.0.1:43127`。
 
+如果准备让 AI Agent 代为配置新机器，请直接把 [AGENT_SETUP.md](./AGENT_SETUP.md) 交给它。文档包含依赖检查、Bilibili / YouTube / 本地视频配置、Agent 后端选择、低内存任务目录和最终验收清单；安装软件或登录账号前会要求 Agent 先取得用户同意。
+
 ## 开发模式
 
 需要 Node.js 22.13 或更新版本。
