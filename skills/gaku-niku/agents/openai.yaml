@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gaku-Niku 自学型熟肉机"
+  short_description: "单模型完成资料预习、精准翻译、字幕质检与视频封装全流程"
+  default_prompt: "Use $gaku-niku to research this work and complete the entire subtitle localization workflow with one model."

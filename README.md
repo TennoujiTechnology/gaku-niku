@@ -6,6 +6,16 @@ Gaku-Niku 是一台会做功课的本地熟肉机。给它一段 Bilibili、YouT
 
 项目把 `precision-video-subtitles` skill 装进了可视化 harness：机器负责跑完整流程，人可以在时间轴上随时接管和精修。目标很简单——少一点生硬机翻，多一点真正看懂作品后的熟肉。
 
+## 只要 Skill，不要前端？
+
+纯 Skill 版本位于 [`skills/gaku-niku/`](./skills/gaku-niku/)，也可以[直接下载 `gaku-niku-skill.zip`](https://github.com/TennoujiTechnology/gaku-niku/releases/download/skill-v1.0.0/gaku-niku-skill.zip)。它把资料预习、听写判断、逐句翻译、时间点 OCR、字幕样式、封装和完整验收交给同一个模型连续完成；FFmpeg、下载器和校验脚本只负责确定性工具工作，不需要再拼多个 Agent。
+
+把整个 `gaku-niku` 文件夹放进 Agent 的 skills 目录，然后这样调用：
+
+```text
+Use $gaku-niku to research this work and complete the entire subtitle localization workflow with one model.
+```
+
 ## 它会做什么
 
 - 自动识别视频来源，获取最高授权画质，并输出 SRT / ASS / MKV / MP4。
