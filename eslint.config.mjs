@@ -11,6 +11,10 @@ const eslintConfig = defineConfig([
   globalIgnores([
     ".next/**",
     "dist/**",
+    "standalone/dist/**",
+    ".precision-subtitle-studio/**",
+    "promo/**/render/**",
+    "**/._*",
     "out/**",
     "build/**",
     "next-env.d.ts",

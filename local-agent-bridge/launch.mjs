@@ -7,9 +7,16 @@ const bridge = spawn(process.execPath, [path.join(projectRoot, "local-agent-brid
   cwd: projectRoot,
   stdio: "inherit",
 });
-const web = spawn(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "dev"], {
+const vinext = path.join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "vinext.cmd" : "vinext");
+const web = spawn(vinext, ["dev"], {
   cwd: projectRoot,
   stdio: "inherit",
+  windowsHide: true,
+});
+
+web.on("error", (error) => {
+  console.error(`无法启动界面开发服务：${error.message}。请先在项目目录安装前端依赖。`);
+  if (!bridge.killed) bridge.kill("SIGTERM");
 });
 
 function stop(signal) {

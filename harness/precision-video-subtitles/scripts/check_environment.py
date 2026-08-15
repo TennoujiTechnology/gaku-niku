@@ -49,7 +49,7 @@ def main() -> int:
     alternatives: list[str] = []
     if kind == "bilibili" and not (tools["yutto"]["path"] or tools["uvx"]["path"]):
         missing.append("yutto-or-uvx")
-        alternatives.append("Install yutto or use uvx yutto after user approval")
+        alternatives.append("Install yutto or use uvx --from yutto==2.2.0 yutto after user approval")
     elif kind == "youtube" and not tools["yt-dlp"]["path"]:
         missing.append("yt-dlp")
         alternatives.append("Install the official yt-dlp build after user approval")

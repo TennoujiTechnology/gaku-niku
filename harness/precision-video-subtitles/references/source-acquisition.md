@@ -22,7 +22,7 @@
 
 If the `bilibili-video-download` skill is available, read and follow it before acting. Its authentication and yutto rules take precedence.
 
-Preferred tool: `yutto`. If `yutto` is absent but `uvx` exists, replace `yutto` below with `uvx yutto`.
+Preferred tool: `yutto`. If `yutto` is absent but `uvx` exists, replace `yutto` below with `uvx --from yutto==2.2.0 yutto` so every machine uses the reviewed version from `runtime/runtime-manifest.json`.
 
 Check login:
 

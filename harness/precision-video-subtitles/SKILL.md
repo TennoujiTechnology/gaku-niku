@@ -71,6 +71,17 @@ Use this priority order:
 3. High-quality ASR aligned to the media.
 4. Manual transcription for gaps and disputed lines.
 
+Honor the job's explicit transcription configuration instead of silently choosing an ASR engine. Supported routes include local Faster-Whisper, local OpenAI Whisper, whisper.cpp, OpenAI-compatible Audio Transcription APIs, and Deepgram. Keep the transcription model/API separate from the translation model/API; never use a chat model to invent unheard source dialogue.
+
+Map the user's quality preset to real behavior:
+
+- `fast`: lightweight model, beam size 1, one pass; suitable only for preview and coarse timing.
+- `balanced`: Turbo/current balanced model, beam size around 5, VAD and overlap reconciliation.
+- `accurate`: strongest selected ASR model, word timestamps when supported, diarization when enabled, beam size around 8.
+- `maximum`: accurate mode plus a second pass over low-confidence spans and disagreements; do not rerun already high-confidence audio unnecessarily.
+
+For online ASR, extract audio and upload only bounded 5–10 minute chunks. Do not upload the video container unless the chosen transcription endpoint explicitly requires it. For local ASR, choose a compute type compatible with the detected hardware and quality request; fail with a clear dependency/model message rather than silently falling back to a lower-quality engine.
+
 Normalize to UTF-8 SRT while preserving the untouched original subtitle file. Split long media into 5–10 minute audio chunks; include overlap and reconcile duplicates by timestamp. Keep source transcription separate from translation.
 
 Request word-level timestamps when the transcriber supports them. For multi-speaker material, label speakers with diarization anchored by known self-introductions or other verified clean clips; visually review low-confidence turns instead of treating an anonymous cluster ID as identity.

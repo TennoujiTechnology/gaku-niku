@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { readRuntimeManifest, runtimeEnvironmentKey } from "../local-agent-bridge/runtime-manager.mjs";
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const manifest = await readRuntimeManifest(path.join(projectRoot, "runtime", "runtime-manifest.json"));
+const targets = ["macos-arm64", "macos-x64", "windows-arm64", "windows-x64"];
+
+for (const target of targets) {
+  const asset = manifest.uv.assets[target];
+  assert.ok(asset, `缺少 ${target} 的 uv 发布资产`);
+  assert.match(asset.url, /^https:\/\/github\.com\/astral-sh\/uv\/releases\/download\//);
+  assert.match(asset.sha256, /^[a-f0-9]{64}$/);
+}
+
+for (const [name, environment] of Object.entries(manifest.environments)) {
+  assert.ok(environment.packages.length > 0, `${name} 没有依赖`);
+  assert.ok(environment.packages.every((item) => /^[A-Za-z0-9_.-]+==[^=]+$/.test(item)), `${name} 存在未固定版本的依赖`);
+  process.stdout.write(`${name}: ${runtimeEnvironmentKey(environment.packages)}\n`);
+}
+
+process.stdout.write(`runtime manifest OK · uv ${manifest.uv.version} · Python ${manifest.python.version}\n`);

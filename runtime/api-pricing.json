@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-08-14",
+  "estimationPolicy": "When cached-token usage is not returned separately, all input tokens are conservatively estimated at the cache-miss rate.",
+  "providers": {
+    "openai": {
+      "docsUrl": "https://developers.openai.com/api/docs/models/compare",
+      "models": {
+        "gpt-5.6-sol": { "currency": "USD", "inputPerMillion": 5, "cachedInputPerMillion": 0.5, "outputPerMillion": 30, "note": "Standard processing. Requests above the long-context threshold may receive an official pricing multiplier." },
+        "gpt-5.6-terra": { "currency": "USD", "inputPerMillion": 2.5, "cachedInputPerMillion": 0.25, "outputPerMillion": 15, "note": "Standard processing. Requests above the long-context threshold may receive an official pricing multiplier." },
+        "gpt-5.6-luna": { "currency": "USD", "inputPerMillion": 1, "cachedInputPerMillion": 0.1, "outputPerMillion": 6, "note": "Standard processing. Requests above the long-context threshold may receive an official pricing multiplier." }
+      }
+    },
+    "xai": {
+      "docsUrl": "https://docs.x.ai/developers/pricing",
+      "models": {
+        "grok-4.5": { "currency": "USD", "inputPerMillion": 2, "cachedInputPerMillion": 0.3, "outputPerMillion": 6, "note": "Short-context rate. Requests at or above 200K input tokens use the official long-context rate." },
+        "grok-4.3": { "currency": "USD", "inputPerMillion": 1.25, "cachedInputPerMillion": 0.2, "outputPerMillion": 2.5, "note": "Short-context rate. Requests at or above 200K input tokens use the official long-context rate." }
+      }
+    },
+    "deepseek": {
+      "docsUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+      "models": {
+        "deepseek-v4-pro": { "currency": "USD", "inputPerMillion": 0.435, "cachedInputPerMillion": 0.003625, "outputPerMillion": 0.87 },
+        "deepseek-v4-flash": { "currency": "USD", "inputPerMillion": 0.14, "cachedInputPerMillion": 0.0028, "outputPerMillion": 0.28 }
+      }
+    },
+    "kimi": {
+      "docsUrl": "https://www.kimi.com/zh-cn/help/kimi-api/api-pricing",
+      "models": {
+        "kimi-k3": { "currency": "CNY", "inputPerMillion": 20, "cachedInputPerMillion": 2, "outputPerMillion": 100, "note": "官方联网搜索另收 ¥0.03/次；本估算不含按次工具费。" },
+        "kimi-k2.6": { "currency": "CNY", "inputPerMillion": 6.5, "cachedInputPerMillion": 1.1, "outputPerMillion": 27, "note": "官方联网搜索另收 ¥0.03/次；本估算不含按次工具费。" }
+      }
+    },
+    "kimi_intl": {
+      "docsUrl": "https://platform.kimi.ai/docs/pricing/chat",
+      "models": {
+        "kimi-k3": { "currency": "USD", "inputPerMillion": 3, "cachedInputPerMillion": 0.3, "outputPerMillion": 15, "note": "Official web search is billed separately per call; tool-call fees are not included here." },
+        "kimi-k2.6": { "currency": "USD", "inputPerMillion": 0.95, "cachedInputPerMillion": 0.16, "outputPerMillion": 4, "note": "Official web search is billed separately per call; tool-call fees are not included here." }
+      }
+    },
+    "mimo": {
+      "docsUrl": "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go",
+      "models": {
+        "mimo-v2.5-pro": { "currency": "CNY", "inputPerMillion": 3, "cachedInputPerMillion": 0.025, "outputPerMillion": 6 },
+        "mimo-v2.5": { "currency": "CNY", "inputPerMillion": 1, "cachedInputPerMillion": 0.02, "outputPerMillion": 2 }
+      }
+    },
+    "minimax": {
+      "docsUrl": "https://platform.minimaxi.com/docs/guides/pricing-paygo",
+      "models": {
+        "MiniMax-M2.7": { "currency": "CNY", "inputPerMillion": 2.1, "cachedInputPerMillion": 0.42, "cacheWritePerMillion": 2.625, "outputPerMillion": 8.4 },
+        "MiniMax-M2.7-highspeed": { "currency": "CNY", "inputPerMillion": 4.2, "cachedInputPerMillion": 0.42, "cacheWritePerMillion": 2.625, "outputPerMillion": 16.8 }
+      }
+    },
+    "glm": {
+      "docsUrl": "https://bigmodel.cn/pricing",
+      "models": {
+        "glm-5.2": { "currency": "CNY", "inputPerMillion": 8, "cachedInputPerMillion": 2, "outputPerMillion": 28, "note": "缓存存储当前由官方标注为限时免费；本估算不含后续可能产生的存储费。" }
+      }
+    }
+  }
+}

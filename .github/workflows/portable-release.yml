@@ -1,0 +1,45 @@
+name: Portable release
+
+on:
+  pull_request:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: macos-arm64
+          - os: windows-latest
+            target: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:standalone
+      - run: pnpm release:portable -- --target=${{ matrix.target }} --output=${{ runner.temp }}/gaku-niku-release
+      - name: Test packaged application
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: pnpm release:smoke -- "${{ runner.temp }}/gaku-niku-release/staging/GakuNiku-v0.2.0-${{ matrix.target }}"
+      - name: Test packaged application
+        if: runner.os != 'Windows'
+        run: pnpm release:smoke -- "${{ runner.temp }}/gaku-niku-release/staging/GakuNiku-v0.2.0-${{ matrix.target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GakuNiku-v0.2.0-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/gaku-niku-release/GakuNiku-v0.2.0-${{ matrix.target }}.zip
+            ${{ runner.temp }}/gaku-niku-release/SHA256SUMS.txt
+          if-no-files-found: error
