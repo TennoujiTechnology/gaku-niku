@@ -13,7 +13,7 @@ async function startBridge() {
   const port = 45200 + Math.floor(Math.random() * 800);
   const child = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "server.mjs")], {
     cwd: projectRoot,
-    env: { ...process.env, PSS_BRIDGE_PORT: String(port), PSS_JOBS_PATH: path.join(root, "jobs"), PSS_ASR_ROOT: path.join(root, "default-asr"), PSS_ASR_LOCAL_RUNTIME_ROOT: path.join(root, "local-runtimes"), PSS_ASR_PYTHON: path.join(root, "missing-python"), PSS_CODEX_PATH: "/usr/bin/true" },
+    env: { ...process.env, PSS_BRIDGE_PORT: String(port), PSS_JOBS_PATH: path.join(root, "jobs"), PSS_ASR_ROOT: path.join(root, "default-asr"), PSS_ASR_LOCAL_RUNTIME_ROOT: path.join(root, "local-runtimes"), PSS_ASR_PYTHON: path.join(root, "missing-python"), PSS_CODEX_PATH: process.execPath },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
@@ -35,7 +35,7 @@ test("transcription check is read-only and reports missing local dependencies", 
   const response = await fetch(`http://127.0.0.1:${bridge.port}/api/transcription/check`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transcription: { mode: "local", provider: "faster_whisper", model: "turbo", diarization: false } }),
+    body: JSON.stringify({ transcription: { mode: "local", provider: "faster_whisper", model: "turbo", diarization: false, runtimeRoot: path.join(bridge.root, "default-asr", "runtimes") } }),
   });
   assert.equal(response.status, 200);
   const result = await response.json();
@@ -184,7 +184,7 @@ test("online real-audio test extracts a bounded local sample and returns transcr
     if (result.status !== "running") break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "completed", result.error || "真实短音频测试未完成");
   assert.equal(result.result.text, "これは実音声テストです");
   assert.equal(result.result.sampleDuration, 2);
   assert.ok(result.result.elapsedMs > 0);

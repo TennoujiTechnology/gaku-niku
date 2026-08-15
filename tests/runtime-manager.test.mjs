@@ -24,7 +24,7 @@ test("Windows executable resolution honors PATHEXT", async () => {
   assert.equal(findExecutable("codex", { platform: "win32", env: { PATH: directory, PATHEXT: ".EXE;.CMD" } }), command);
 });
 
-test("Unix executable resolution requires an executable file", async () => {
+test("Unix executable resolution requires an executable file", { skip: process.platform === "win32" }, async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "pss-unix-cli-"));
   const command = path.join(directory, "uv");
   await writeFile(command, "#!/bin/sh\nexit 0\n", "utf8");
