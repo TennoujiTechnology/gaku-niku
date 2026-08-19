@@ -20,4 +20,10 @@ for (const [name, environment] of Object.entries(manifest.environments)) {
   process.stdout.write(`${name}: ${runtimeEnvironmentKey(environment.packages)}\n`);
 }
 
+for (const [name, asset] of Object.entries(manifest.environments["diarization-sherpa"].models || {})) {
+  assert.match(asset.url, /^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\//, `${name} 模型必须来自 Sherpa-ONNX 官方 Release`);
+  assert.match(asset.sha256, /^[a-f0-9]{64}$/, `${name} 模型缺少 SHA256`);
+  assert.ok(asset.bytes > 1_000_000, `${name} 模型体积异常`);
+}
+
 process.stdout.write(`runtime manifest OK · uv ${manifest.uv.version} · Python ${manifest.python.version}\n`);

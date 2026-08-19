@@ -11,6 +11,7 @@ import { finished } from "node:stream/promises";
 import { deflateSync } from "node:zlib";
 import { ProxyAgent } from "undici";
 import { ambiguityReviewModeFromConfig, ambiguityReviewPolicyPrompt, workflowPhaseStatus } from "./ambiguity-policy.mjs";
+import { updateJsonAtomic, writeJsonAtomic } from "./manifest-store.mjs";
 import { ensureManagedUv, findExecutable, managedInstallCapabilities, managedUvPath, managedUvxPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "./runtime-manager.mjs";
 
 const bridgeDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,10 @@ const projectRoot = path.resolve(bridgeDirectory, "..");
 const staticRoot = path.join(projectRoot, "standalone");
 const harnessPath = path.join(projectRoot, "harness", "precision-video-subtitles", "SKILL.md");
 const apiHelperPath = path.join(bridgeDirectory, "api-model-call.mjs");
+const manifestHelperPath = path.join(bridgeDirectory, "manifest-update.mjs");
+const whisperxPreflightPath = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "preflight_whisperx.py");
+const sherpaDiarizationPath = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "diarize_sherpa_onnx.py");
+const sherpaDiarizationPreparePath = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "prepare_sherpa_diarization.py");
 const runtimeManifestPath = path.join(projectRoot, "runtime", "runtime-manifest.json");
 const apiPricingManifestPath = path.join(projectRoot, "runtime", "api-pricing.json");
 const packagedToolchainRoot = path.join(projectRoot, "runtime", "toolchain");
@@ -566,14 +571,34 @@ function transcriptionPaths(input = {}) {
     : compatibility.compatible
       ? path.join(root, "runtimes")
       : path.join(localRuntimeRoot, environmentKey(root));
+  const diarizationEngine = String(input.diarizationEngine || "sherpa_onnx") === "pyannote" ? "pyannote" : "sherpa_onnx";
   return {
     root,
     runtimeRoot,
     baseRuntimePath: path.join(runtimeRoot, "base"),
-    diarizationRuntimePath: path.join(runtimeRoot, "diarization"),
+    diarizationRuntimePath: path.join(runtimeRoot, `diarization-${diarizationEngine.replace("_", "-")}`),
     modelRoot: path.join(root, "models"),
     filesystem: compatibility,
   };
+}
+
+function diarizationEngine(input = {}) {
+  return String(input.diarizationEngine || "sherpa_onnx") === "pyannote" ? "pyannote" : "sherpa_onnx";
+}
+
+function diarizationEnvironmentManifest(input = {}) {
+  return runtimeManifest.environments[diarizationEngine(input) === "pyannote" ? "diarization-pyannote" : "diarization-sherpa"];
+}
+
+function sherpaDiarizationModelPaths(paths) {
+  const root = path.join(paths.modelRoot, "diarization", "sherpa-onnx");
+  return { root, segmentation: path.join(root, "segmentation.onnx"), embedding: path.join(root, "embedding.onnx") };
+}
+
+async function sherpaDiarizationModelsReady(paths) {
+  const models = sherpaDiarizationModelPaths(paths);
+  const [segmentation, embedding] = await Promise.all([stat(models.segmentation).catch(() => null), stat(models.embedding).catch(() => null)]);
+  return Boolean(segmentation?.isFile() && segmentation.size > 1_000_000 && embedding?.isFile() && embedding.size > 10_000_000);
 }
 
 function asrPythonCandidates(paths) {
@@ -698,6 +723,7 @@ async function transcriptionEnvironment(input = {}) {
   const provider = String(input.provider || "faster_whisper");
   const model = String(input.model || "turbo");
   const wantsDiarization = input.diarization !== false;
+  const selectedDiarizationEngine = diarizationEngine(input);
   const paths = transcriptionPaths(input);
   const profile = transcriptionModelProfiles[model] || { downloadBytes: 0, memoryBytes: 0, label: model };
   const fsInfo = await statfs(existingAncestor(paths.root)).catch(() => null);
@@ -711,6 +737,7 @@ async function transcriptionEnvironment(input = {}) {
     cachePath: paths.modelRoot,
     runtimePath: paths.baseRuntimePath,
     diarizationRuntimePath: paths.diarizationRuntimePath,
+    diarizationEngine: selectedDiarizationEngine,
     storageLayout: {
       filesystem: paths.filesystem.type,
       runtimeCompatible: paths.filesystem.compatible,
@@ -779,12 +806,16 @@ async function transcriptionEnvironment(input = {}) {
   const modelReady = await fasterWhisperModelReady(paths.modelRoot, repository, model);
   const runtimeReady = Boolean(modules.faster_whisper && modules.ctranslate2);
   const diarizationPython = venvPython(paths.diarizationRuntimePath);
+  const diarizationModuleNames = selectedDiarizationEngine === "pyannote"
+    ? ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"]
+    : ["sherpa_onnx", "numpy"];
   const diarizationModules = wantsDiarization
-    ? await pythonModuleState(diarizationPython, ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"], { timeoutMs: 120_000 })
+    ? await pythonModuleState(diarizationPython, diarizationModuleNames, { timeoutMs: 120_000 })
     : {};
-  const diarizationImportReady = wantsDiarization && ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"].every((name) => diarizationModules[name]);
+  const diarizationImportReady = wantsDiarization && diarizationModuleNames.every((name) => diarizationModules[name]);
+  const diarizationModelsReady = wantsDiarization && (selectedDiarizationEngine === "pyannote" || await sherpaDiarizationModelsReady(paths));
   const hfTokenReady = Boolean(String(input.hfToken || "").trim() || process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN);
-  const diarizationReady = Boolean(diarizationImportReady && hfTokenReady);
+  const diarizationReady = Boolean(diarizationImportReady && diarizationModelsReady && (selectedDiarizationEngine !== "pyannote" || hfTokenReady));
   const baseReady = runtimeReady && modelReady;
   const uv = executable("uv");
   const managedUv = managedUvPath(localRuntimeRoot, runtimeManifest);
@@ -813,10 +844,16 @@ async function transcriptionEnvironment(input = {}) {
   if (wantsDiarization && !diarizationImportReady) issues.push({
     id: "diarization-import",
     label: "说话人分离环境未通过深度检查",
-    detail: Object.values(diarizationModules._errors || {}).filter(Boolean).join("；") || "WhisperX 或其深层依赖尚未完整安装",
+    detail: Object.values(diarizationModules._errors || {}).filter(Boolean).join("；") || `${selectedDiarizationEngine === "pyannote" ? "WhisperX" : "Sherpa-ONNX"} 或其依赖尚未完整安装`,
     repair: "单独配置说话人分离；程序会先在临时环境安装并验证，失败不会影响基础听写。",
   });
-  if (wantsDiarization && diarizationImportReady && !hfTokenReady) issues.push({
+  if (wantsDiarization && selectedDiarizationEngine === "sherpa_onnx" && diarizationImportReady && !diarizationModelsReady) issues.push({
+    id: "diarization-models",
+    label: "本地分离模型尚未准备",
+    detail: "缺少 Sherpa-ONNX 分段或声纹 ONNX 模型",
+    repair: "确认约 47 MB 下载后准备本地分离模型；不需要 Hugging Face Token。",
+  });
+  if (wantsDiarization && selectedDiarizationEngine === "pyannote" && diarizationImportReady && !hfTokenReady) issues.push({
     id: "diarization-token",
     label: "说话人分离缺少授权",
     detail: "WhisperX 已可导入，但尚未提供 Hugging Face Token，或尚未接受相关模型条款。",
@@ -827,12 +864,15 @@ async function transcriptionEnvironment(input = {}) {
   return {
     ...common,
     python,
-    ready: baseReady && (!wantsDiarization || diarizationReady),
+    ready: baseReady,
+    requestedReady: baseReady && (!wantsDiarization || diarizationReady),
+    diarizationReady,
+    degraded: Boolean(baseReady && wantsDiarization && !diarizationReady),
     baseReady,
     components: [
       { id: "runtime", label: "基础听写运行库", status: runtimeReady ? "ready" : "missing", detail: runtimeReady ? `Faster-Whisper 与 CTranslate2 已存在 · ${python}` : "尚未安装到项目独立环境" },
       { id: "model", label: `${profile.label} 模型`, status: modelReady ? "ready" : "missing", detail: modelReady ? `已缓存在 ${paths.modelRoot}` : `预计下载 ${formatStorage(profile.downloadBytes)}` },
-      { id: "diarization", label: "说话人分离（可选）", status: !wantsDiarization ? "optional" : diarizationReady ? "ready" : "missing", detail: !wantsDiarization ? "当前未启用，不影响基础听写" : diarizationImportReady ? "WhisperX 独立环境已验证，但还需要 Hugging Face Token 与模型条款授权" : `需要单独配置 WhisperX；不会修改基础听写环境${paths.filesystem.compatible ? "" : "，运行库会自动放到本机兼容磁盘"}` },
+      { id: "diarization", label: "说话人分离（可选）", status: !wantsDiarization ? "optional" : diarizationReady ? "ready" : "degraded", detail: !wantsDiarization ? "当前未启用，不影响基础听写" : selectedDiarizationEngine === "sherpa_onnx" ? diarizationReady ? "Sherpa-ONNX 本地运行库与模型已就绪；不需要 Hugging Face 授权" : `Sherpa-ONNX 尚未准备完整；可下载约 47 MB 模型后启用${paths.filesystem.compatible ? "" : "，运行库会放到本机兼容磁盘"}` : diarizationImportReady ? "WhisperX 独立环境已验证；任务启动预检会实际核对 Hugging Face 模型权限" : `WhisperX 未准备好；任务会立即关闭说话人分离并继续基础听写${paths.filesystem.compatible ? "" : "，运行库可稍后配置到本机兼容磁盘"}` },
       { id: "ffmpeg", label: "音频抽取", status: executable("ffmpeg") ? "ready" : "missing", detail: executable("ffmpeg") || "未发现 FFmpeg" },
     ],
     installable: baseInstallable,
@@ -860,18 +900,18 @@ async function transcriptionEnvironment(input = {}) {
       pythonReady: pythonSupports(baseEnvironmentPythonVersion, 10, 14),
       pythonPath: existsSync(baseEnvironmentPython) ? baseEnvironmentPython : "",
       baseEnvironmentKey: runtimeEnvironmentKey(runtimeManifest.environments["asr-base"].packages),
-      diarizationEnvironmentKey: runtimeEnvironmentKey(runtimeManifest.environments.diarization.packages),
-      isolation: "基础听写与说话人分离使用两个独立环境；模型缓存与运行库分开保存",
+      diarizationEnvironmentKey: runtimeEnvironmentKey(diarizationEnvironmentManifest(input).packages),
+      isolation: `基础听写与说话人分离使用两个独立环境；当前分离引擎 ${selectedDiarizationEngine === "pyannote" ? "WhisperX / pyannote" : "Sherpa-ONNX"}`,
     },
     diagnostics: {
-      healthy: baseReady && (!wantsDiarization || diarizationReady),
+      healthy: baseReady,
       summary: issues[0]?.detail || "本地听写环境已通过检查",
       issues,
-      repairComponents: { runtime: !runtimeReady, model: !modelReady, diarization: wantsDiarization && !diarizationImportReady },
+      repairComponents: { runtime: !runtimeReady, model: !modelReady, diarization: wantsDiarization && !diarizationReady },
       lastInstall: previousInstall || null,
     },
     recommendation: baseReady
-      ? wantsDiarization && !diarizationReady ? "基础听写已可用；若不需要区分说话人，可关闭说话人分离后开始。" : "本地听写环境已准备完成。"
+      ? wantsDiarization && !diarizationReady ? `基础听写已可用；${selectedDiarizationEngine === "pyannote" ? "pyannote" : "Sherpa-ONNX"} 尚未准备，任务启动时会立即降级继续。` : "本地听写环境已准备完成。"
       : paths.filesystem.compatible
         ? "勾选缺失项目并确认后下载；运行库与模型会保存在所选项目数据目录。"
         : "勾选缺失项目并确认后下载；模型留在所选磁盘，运行库会自动放到本机兼容目录。",
@@ -1061,6 +1101,202 @@ function startTranscriptionTest(input) {
   return operation;
 }
 
+function runPreflightProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || projectRoot,
+      env: { ...process.env, ...(options.env || {}) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const collect = (current, chunk) => `${current}${chunk}`.slice(-64 * 1024);
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error); else resolve(result);
+    };
+    child.stdout.on("data", (chunk) => { stdout = collect(stdout, chunk); });
+    child.stderr.on("data", (chunk) => { stderr = collect(stderr, chunk); });
+    child.on("error", (error) => finish(error));
+    child.on("close", (code, signal) => {
+      if (code === 0) finish(null, { stdout, stderr, code });
+      else finish(new Error(`${options.label || path.basename(command)}失败（代码 ${code ?? "unknown"}${signal ? `，信号 ${signal}` : ""}）${stderr.trim() || stdout.trim() ? `：${(stderr.trim() || stdout.trim()).slice(-1800)}` : ""}`));
+    });
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(new Error(`${options.label || path.basename(command)}超过 ${Math.ceil((options.timeoutMs || 120_000) / 1000)} 秒，已停止且不会自动重跑整条流水线`));
+    }, options.timeoutMs || 120_000);
+  });
+}
+
+function preflightFailureSummary(error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const lowered = detail.toLowerCase();
+  const authorization = /(?:http\s*)?(?:401|403)|gated|restricted|access to model|unauthorized|forbidden/.test(lowered) ? "denied" : "unknown";
+  return { detail: detail.slice(0, 1800), authorization };
+}
+
+async function huggingFaceDiarizationAuthorization(input, token) {
+  if (!token) return { status: "degraded", authorization: "missing", detail: "未提供 Hugging Face Token" };
+  const model = String(input.diarizationModel || "pyannote/speaker-diarization-community-1");
+  const endpoint = `https://huggingface.co/${model}/resolve/main/config.yaml`;
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}`, range: "bytes=0-31" },
+      signal: AbortSignal.timeout(15_000),
+      ...proxyFetchOptions(input.proxyUrl),
+    });
+    const redirectedToLogin = /huggingface\.co\/(?:login|join)/i.test(response.url);
+    const htmlInsteadOfModel = /text\/html/i.test(response.headers.get("content-type") || "");
+    await response.body?.cancel().catch(() => {});
+    if ([401, 403].includes(response.status)) return { status: "degraded", authorization: "denied", detail: `Hugging Face 返回 HTTP ${response.status}，未获得 ${model} 访问权限` };
+    if (redirectedToLogin || htmlInsteadOfModel) return { status: "degraded", authorization: "denied", detail: `Hugging Face 没有返回 ${model} 模型文件；Token 未获 gated 模型权限` };
+    if (!response.ok) return { status: "degraded", authorization: "unknown", detail: `Hugging Face 权限预检返回 HTTP ${response.status}；为避免长重试，本任务关闭说话人分离` };
+    return { status: "ready", authorization: "verified", model };
+  } catch (error) {
+    return { status: "degraded", authorization: "unknown", detail: `Hugging Face 权限预检失败：${error instanceof Error ? error.message : String(error)}；本任务不进入模型下载重试` };
+  }
+}
+
+async function runTaskTranscriptionPreflight(input = {}, source = "") {
+  const checkedAt = new Date().toISOString();
+  if (String(input.mode || "local") !== "local" || String(input.provider || "faster_whisper") !== "faster_whisper") {
+    return { checked_at: checkedAt, status: "not_applicable", mode: input.mode || "api", provider: input.provider || "unknown" };
+  }
+  const environment = await transcriptionEnvironment(input);
+  if (!environment.baseReady) throw new Error(`听写启动预检失败：${environment.recommendation}`);
+  const ffmpeg = executable("ffmpeg");
+  const ffprobe = executable("ffprobe");
+  if (!ffmpeg || !ffprobe) throw new Error("听写启动预检失败：FFmpeg 或 FFprobe 不可用");
+  const directory = path.join(dataRoot, "asr-preflight", randomUUID());
+  const audioPath = path.join(directory, "sample.flac");
+  const diarizationAudioPath = path.join(directory, "sample-diarization.wav");
+  const transcriptPath = path.join(directory, "transcript.json");
+  const whisperxPath = path.join(directory, "whisperx.json");
+  const sherpaPath = path.join(directory, "sherpa.json");
+  await mkdir(directory, { recursive: true });
+  try {
+    const sourcePath = localSourcePath(source);
+    if (sourcePath && existsSync(sourcePath)) {
+      const operation = { events: [], progress: 0 };
+      await extractTranscriptionSample(operation, sourcePath, audioPath);
+    } else {
+      await runPreflightProcess(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000:duration=3", "-ac", "1", "-c:a", "flac", audioPath], { label: "FFmpeg 动态库与音频链路预检", timeoutMs: 30_000 });
+    }
+    await runPreflightProcess(ffprobe, ["-v", "error", "-show_entries", "stream=codec_name,sample_rate,channels", "-of", "json", audioPath], { label: "FFprobe 解码预检", timeoutMs: 15_000 });
+    await runPreflightProcess(environment.python, [
+      path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "transcribe_faster_whisper.py"),
+      audioPath,
+      transcriptPath,
+      "--model", String(input.model || "turbo"),
+      "--language", String(input.language || "ja"),
+      "--beam-size", "1",
+      "--model-cache", environment.cachePath,
+    ], { label: "Faster-Whisper 模型缓存与真实推理预检", timeoutMs: 240_000 });
+    const baseResult = await readJsonFile(transcriptPath, null);
+    if (!baseResult) throw new Error("Faster-Whisper 预检没有产生可解析结果");
+    const preflight = {
+      checked_at: checkedAt,
+      status: "ready",
+      ffmpeg: { status: "ready", executable: ffmpeg, probe: ffprobe },
+      asr: { status: "ready", engine: "faster-whisper", model: input.model || "turbo", cache: environment.cachePath, real_inference: true },
+      alignment: { status: input.diarization === false ? "disabled" : "pending", engine: "whisperx" },
+      diarization: { status: input.diarization === false ? "disabled" : "pending", engine: diarizationEngine(input) },
+    };
+    if (input.diarization === false) return preflight;
+    if (diarizationEngine(input) === "sherpa_onnx") {
+      const diarizationPython = venvPython(transcriptionPaths(input).diarizationRuntimePath);
+      const models = sherpaDiarizationModelPaths(transcriptionPaths(input));
+      if (!environment.diarizationReady || !existsSync(diarizationPython)) {
+        preflight.diarization = { status: "degraded", engine: "sherpa-onnx", authorization: "not_required", detail: "Sherpa-ONNX 本地运行库或模型未准备完整；已立即降级" };
+        preflight.alignment = { status: "not_applicable", engine: "word-timestamps", detail: "Sherpa-ONNX 仅负责说话人聚类，词级时间戳继续使用 Faster-Whisper" };
+        return preflight;
+      }
+      try {
+        await runPreflightProcess(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-i", audioPath, "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", diarizationAudioPath], { label: "Sherpa-ONNX PCM 音频预检", timeoutMs: 30_000 });
+        await runPreflightProcess(diarizationPython, [
+          sherpaDiarizationPath,
+          diarizationAudioPath,
+          sherpaPath,
+          "--segmentation-model", models.segmentation,
+          "--embedding-model", models.embedding,
+        ], { label: "Sherpa-ONNX 本地说话人分离真实推理预检", timeoutMs: 180_000 });
+        const result = await readJsonFile(sherpaPath, null);
+        if (!result || result.status !== "ready") throw new Error(result?.error || "Sherpa-ONNX 预检没有产生可解析结果");
+        preflight.diarization = { status: "ready", engine: "sherpa-onnx", authorization: "not_required", model: "pyannote-segmentation-3.0-onnx + 3D-Speaker", real_inference: true, turns: result.turns?.length || 0 };
+        preflight.alignment = { status: "ready", engine: "faster-whisper-word-timestamps", detail: "词级时间戳已由基础听写真实推理验证" };
+        return preflight;
+      } catch (error) {
+        preflight.diarization = { status: "degraded", engine: "sherpa-onnx", authorization: "not_required", detail: `Sherpa-ONNX 真实音频预检失败：${error instanceof Error ? error.message : String(error)}`.slice(0, 1800) };
+        preflight.alignment = { status: "ready", engine: "faster-whisper-word-timestamps", detail: "基础听写与词级时间戳不受本地分离失败影响" };
+        return preflight;
+      }
+    }
+    if (!environment.diarizationReady && !String(input.hfToken || process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN || "").trim()) {
+      preflight.diarization = { status: "degraded", engine: "pyannote", authorization: "missing", detail: "缺少 Hugging Face Token；已在启动前关闭说话人分离" };
+      preflight.alignment = { status: "degraded", engine: "whisperx", detail: "说话人分离未获授权，本任务不加载可选对齐环境" };
+      return preflight;
+    }
+    const diarizationPython = venvPython(transcriptionPaths(input).diarizationRuntimePath);
+    if (!existsSync(diarizationPython)) {
+      preflight.diarization = { status: "degraded", engine: "pyannote", authorization: "unknown", detail: "WhisperX 独立环境不存在；已立即降级" };
+      preflight.alignment = { status: "degraded", engine: "whisperx", detail: "WhisperX 独立环境不存在" };
+      return preflight;
+    }
+    const token = String(input.hfToken || process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN || "").trim();
+    const authorization = await huggingFaceDiarizationAuthorization(input, token);
+    if (authorization.status !== "ready") {
+      preflight.diarization = { status: "degraded", engine: "pyannote", model: input.diarizationModel || "pyannote/speaker-diarization-community-1", ...authorization };
+      preflight.alignment = { status: "not_run", engine: "whisperx", detail: "pyannote 权限未通过，跳过可选 WhisperX 长加载" };
+      return preflight;
+    }
+    try {
+      await runPreflightProcess(diarizationPython, [
+        whisperxPreflightPath,
+        audioPath,
+        whisperxPath,
+        "--language", String(input.language || "ja"),
+        "--model-cache", environment.cachePath,
+        "--diarization-model", authorization.model,
+      ], {
+        label: "WhisperX 对齐与 pyannote 真实推理预检",
+        timeoutMs: 300_000,
+        env: applyProxyEnv({ HF_TOKEN: token, MPLCONFIGDIR: path.join(directory, "matplotlib"), HF_HOME: environment.cachePath }, input.proxyUrl),
+      });
+      const result = await readJsonFile(whisperxPath, null);
+      if (!result) throw new Error("WhisperX 预检没有产生可解析结果");
+      preflight.alignment = result.alignment;
+      preflight.diarization = result.diarization;
+      preflight.torchcodec = result.torchcodec;
+      preflight.language_assets = result.language_assets;
+      if (result.alignment?.status !== "ready") throw new Error(result.alignment?.error || "WhisperX 对齐模型未通过真实预检");
+      return preflight;
+    } catch (error) {
+      const failure = preflightFailureSummary(error);
+      if (failure.authorization === "denied") {
+        preflight.diarization = { status: "degraded", engine: "pyannote", authorization: "denied", detail: failure.detail };
+        preflight.alignment = { status: "not_run", engine: "whisperx", detail: "pyannote 授权失败后已停止，不进入重试" };
+        return preflight;
+      }
+      const partial = await readJsonFile(whisperxPath, null);
+      if (partial?.alignment?.status === "ready") {
+        preflight.alignment = partial.alignment;
+        preflight.diarization = partial.diarization || { status: "degraded", engine: "pyannote", authorization: failure.authorization, detail: failure.detail };
+        return preflight;
+      }
+      preflight.alignment = partial?.alignment || { status: "degraded", engine: "whisperx", detail: failure.detail };
+      preflight.diarization = partial?.diarization || { status: "degraded", engine: "pyannote", authorization: failure.authorization, detail: failure.detail };
+      return preflight;
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function runTranscriptionInstall(operation, input) {
   try {
     const paths = transcriptionPaths(input);
@@ -1158,7 +1394,10 @@ async function runTranscriptionInstall(operation, input) {
       await runInstallerStep(operation, modelPython, [path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "prepare_faster_whisper.py"), "--model", String(input.model || "turbo"), "--model-cache", paths.modelRoot], `下载 ${input.model || "turbo"} 模型`);
     }
     if (components.diarization) {
-      operationStep(operation, "安装说话人分离", 78, "正在独立临时环境中安装 WhisperX，不会修改基础听写");
+      const selectedDiarizationEngine = diarizationEngine(input);
+      const environmentManifest = diarizationEnvironmentManifest(input);
+      const engineLabel = selectedDiarizationEngine === "pyannote" ? "WhisperX / pyannote" : "Sherpa-ONNX";
+      operationStep(operation, "安装说话人分离", 78, `正在独立临时环境中安装 ${engineLabel}，不会修改基础听写`);
       await persistTranscriptionInstall(operation, input);
       const stagingPath = `${paths.diarizationRuntimePath}.staging-${operation.id}`;
       const stagingPython = venvPython(stagingPath);
@@ -1166,23 +1405,28 @@ async function runTranscriptionInstall(operation, input) {
       try {
         await rm(stagingPath, { recursive: true, force: true });
         if (uv) {
-          await runInstallerStep(operation, uv, ["venv", "--python", runtimeManifest.python.version, stagingPath], "准备 WhisperX 临时环境", { env: uvEnv });
-          await runInstallerStep(operation, uv, ["pip", "install", ...uvCopyArgs, "--python", stagingPython, ...runtimeManifest.environments.diarization.packages], "安装 WhisperX 说话人分离", { env: uvEnv });
+          await runInstallerStep(operation, uv, ["venv", "--python", runtimeManifest.python.version, stagingPath], `准备 ${engineLabel} 临时环境`, { env: uvEnv });
+          await runInstallerStep(operation, uv, ["pip", "install", ...uvCopyArgs, "--python", stagingPython, ...environmentManifest.packages], `安装 ${engineLabel} 说话人分离`, { env: uvEnv });
         } else {
           const basePythonVersion = pythonVersion(python);
           const diarizationBootstrap = pythonSupports(basePythonVersion, 10, 14) ? python : systemPython;
-          if (!pythonSupports(pythonVersion(diarizationBootstrap), 10, 14)) throw new Error("WhisperX 需要 Python 3.10–3.13；当前平台无法准备兼容环境");
-          await runInstallerStep(operation, diarizationBootstrap, ["-m", "venv", stagingPath], "准备 WhisperX 临时环境");
-          await runInstallerStep(operation, stagingPython, ["-m", "pip", "install", ...runtimeManifest.environments.diarization.packages], "安装 WhisperX 说话人分离", { env: applyProxyEnv({}, input.proxyUrl) });
+          if (!pythonSupports(pythonVersion(diarizationBootstrap), 10, 14)) throw new Error(`${engineLabel} 需要 Python 3.10–3.13；当前平台无法准备兼容环境`);
+          await runInstallerStep(operation, diarizationBootstrap, ["-m", "venv", stagingPath], `准备 ${engineLabel} 临时环境`);
+          await runInstallerStep(operation, stagingPython, ["-m", "pip", "install", ...environmentManifest.packages], `安装 ${engineLabel} 说话人分离`, { env: applyProxyEnv({}, input.proxyUrl) });
         }
-        const deepProbe = await pythonModuleState(stagingPython, ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"], { timeoutMs: 180_000 });
-        const missing = ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"].filter((name) => !deepProbe[name]);
-        if (missing.length) throw new Error(`WhisperX 深度验证失败：${missing.join("、")} 无法导入；${Object.values(deepProbe._errors || {}).join("；")}`);
+        const moduleNames = selectedDiarizationEngine === "pyannote" ? ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"] : ["sherpa_onnx", "numpy"];
+        const deepProbe = await pythonModuleState(stagingPython, moduleNames, { timeoutMs: 180_000 });
+        const missing = moduleNames.filter((name) => !deepProbe[name]);
+        if (missing.length) throw new Error(`${engineLabel} 深度验证失败：${missing.join("、")} 无法导入；${Object.values(deepProbe._errors || {}).join("；")}`);
+        if (selectedDiarizationEngine === "sherpa_onnx") {
+          operationStep(operation, "下载本地分离模型", 86, "正在下载并校验约 47 MB 的 Sherpa-ONNX 分段与声纹模型");
+          await runInstallerStep(operation, stagingPython, [sherpaDiarizationPreparePath, "--model-cache", paths.modelRoot], "下载并校验 Sherpa-ONNX 模型", { env: applyProxyEnv({}, input.proxyUrl) });
+        }
         await writeFile(path.join(stagingPath, "precision-runtime.json"), `${JSON.stringify({
-          environment: "diarization",
-          key: runtimeEnvironmentKey(runtimeManifest.environments.diarization.packages),
+          environment: `diarization-${selectedDiarizationEngine}`,
+          key: runtimeEnvironmentKey(environmentManifest.packages),
           python: runtimeManifest.python.version,
-          packages: runtimeManifest.environments.diarization.packages,
+          packages: environmentManifest.packages,
           installedAt: new Date().toISOString(),
         }, null, 2)}\n`, "utf8");
         await rm(backupPath, { recursive: true, force: true });
@@ -1206,6 +1450,7 @@ async function runTranscriptionInstall(operation, input) {
     const resultComponents = Object.fromEntries(operation.result.components.map((item) => [item.id, item]));
     if (components.runtime && resultComponents.runtime?.status !== "ready") throw new Error(`基础运行库配置完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
     if (components.model && resultComponents.model?.status !== "ready") throw new Error(`模型下载完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
+    if (components.diarization && resultComponents.diarization?.status !== "ready") throw new Error(`说话人分离配置完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
     operation.progress = 100;
     appendTranscriptionEvent(operation, "完成", "所选项目已处理，请检查最终状态。", "done");
   } catch (error) {
@@ -1262,7 +1507,11 @@ async function readJsonFile(file, fallback = null) {
 }
 
 async function writeJsonFile(file, value) {
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeJsonAtomic(file, value);
+}
+
+async function updateJsonFile(file, updater, fallback = {}) {
+  return updateJsonAtomic(file, updater, fallback);
 }
 
 function safeKnowledgeId(value) {
@@ -2311,9 +2560,10 @@ function verifiedExternalProcessingConsent(config) {
   return status;
 }
 
-function initialManifest(config) {
+function initialManifest(config, transcriptionPreflight = null) {
+  const diarizationDegraded = transcriptionPreflight?.diarization?.status === "degraded";
   return {
-    schema_version: 1,
+    schema_version: 2,
     created_at: new Date().toISOString(),
     source: { kind: sourceKind(config.source), value: config.source, acquired_media: null },
     languages: { source: config.sourceLanguage || "ja", target: config.targetLanguage || "zh-Hans" },
@@ -2321,8 +2571,9 @@ function initialManifest(config) {
     artifacts: {},
     review_policy: { ambiguities: ambiguityReviewModeFromConfig(config) },
     external_processing: verifiedExternalProcessingConsent(config),
+    ...(transcriptionPreflight ? { transcription_preflight: transcriptionPreflight } : {}),
     limitations: [],
-    notices: [],
+    notices: diarizationDegraded ? [`说话人分离已在任务启动预检中降级：${transcriptionPreflight.diarization.detail || "本地分离引擎未通过"}；基础听写继续，未确认说话人保留 speaker_unknown。`] : [],
   };
 }
 
@@ -2353,6 +2604,7 @@ function buildPrompt(config, jobDirectory, context = {}) {
     ...(context.harnessOverride ? [`用户核对后的 harness 覆盖稿: ${context.harnessOverride}。覆盖稿优先于原始 skill，但仍需读取原始 skill 引用的三个 reference。`] : []),
     `任务目录: ${jobDirectory}`,
     `进度清单: ${path.join(jobDirectory, "manifest.json")}`,
+    `Manifest 单写入器: 禁止直接覆盖、重定向写入或用编辑器修改 manifest.json。每次只把要变更的字段写成 JSON Merge Patch 文件，再运行 node ${manifestHelperPath} ${path.join(jobDirectory, "manifest.json")} PATCH.json；该通道会串行化并原子替换清单。`,
     ...(context.resumeFrom ? [
       `这是一次断点续跑。先读取现有 manifest 与所有已登记产物，已完成且产物校验通过的阶段不得重做；从 ${context.resumeFrom} 开始继续。把该阶段原有 blocked/error 状态改为 in_progress 后再工作。`,
     ] : []),
@@ -2382,7 +2634,11 @@ function buildPrompt(config, jobDirectory, context = {}) {
       ...(config.transcription?.provider === "faster_whisper" ? [
         `Faster-Whisper 已由 Studio 预检。必须用 ${path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "transcribe_faster_whisper.py")} 执行真实听写，Python 路径从 PSS_TRANSCRIPTION_PYTHON 读取，模型缓存从 PSS_TRANSCRIPTION_MODEL_CACHE 读取；禁止重新安装、联网下载或用翻译模型编造原文。先用 FFmpeg 把媒体抽取成 16 kHz 单声道 FLAC 分块，再逐块调用脚本并合并到 ${path.join(jobDirectory, "work", "source-transcript.json")}。`,
       ] : []),
-      ...(config.transcription?.diarization ? ["WhisperX 位于独立环境。必须只使用 PSS_TRANSCRIPTION_DIARIZATION_PYTHON 调用对齐/聚类，不得在基础听写环境安装或修改依赖；匿名 speaker ID 必须结合已知声线、画面与自我介绍复核后才能映射角色名。"] : []),
+      ...(config.transcription?.diarization && diarizationEngine(config.transcription) === "sherpa_onnx" ? [
+        `本任务使用 Sherpa-ONNX 本地说话人分离。先把每个音频分块转为 16 kHz 单声道 PCM16 WAV，再用 PSS_TRANSCRIPTION_DIARIZATION_PYTHON 运行 PSS_TRANSCRIPTION_DIARIZATION_SCRIPT，传入 PSS_TRANSCRIPTION_DIARIZATION_SEGMENTATION_MODEL 与 PSS_TRANSCRIPTION_DIARIZATION_EMBEDDING_MODEL；结果写入 work/diarization.json 后按时间交叠回填匿名 speaker_XX。不得联网下载、不得把匿名簇直接命名为角色。`,
+      ] : []),
+      ...(config.transcription?.diarization && diarizationEngine(config.transcription) === "pyannote" ? ["WhisperX / pyannote 位于独立环境。必须只使用 PSS_TRANSCRIPTION_DIARIZATION_PYTHON 调用对齐/聚类，不得在基础听写环境安装或修改依赖；匿名 speaker ID 必须结合已知声线、画面与自我介绍复核后才能映射角色名。"] : []),
+      ...(config.transcription?.diarizationDegraded ? [`本任务启动预检已关闭说话人分离：${config.transcription.diarizationDegraded}。不得再次加载、下载或重试失败的分离引擎；基础听写照常进行，所有未确认说话人保留 speaker_unknown 并送入精修。`] : []),
     ]),
     `预习关键词: ${(config.research?.keywords ?? []).join(", ")}`,
     `优先研究站点: ${sites.join(", ") || "官方资料优先"}`,
@@ -2397,6 +2653,7 @@ function buildPrompt(config, jobDirectory, context = {}) {
     ...(config.engine?.mode === "api" ? [
       `用户在第一步指定并验证的研究/翻译模型: ${config.engine.provider}/${config.engine.model}。本地 Agent 只负责工具编排；检索词规划、结果筛选、证据归纳、语义判断与每批翻译必须调用用户所选模型，不得用 Codex、Claude 或其他编排模型替代。`,
       `调用方法: 先写 JSON 输入文件 {"messages":[{"role":"system","content":"..."},{"role":"user","content":"..."}]}，再运行 node ${apiHelperPath} 输入文件 输出文件；读取输出 JSON 的 text 字段。按段调用，单次输入不超过 2 MB。`,
+      `翻译批次必须使用自适应协议：输入 JSON 提供 batchItems、batchInstruction、batchSystem、estimatedOutputTokensPerItem 与 maxTokens；${apiHelperPath} 会在预计接近输出上限前自动缩小批次，并且仅对超限子批次二分重试。读取输出的 parts，按每项稳定 id 合并；禁止因一个子批次超限而重新生成整批或整份字幕。`,
       "稳定性约束: 模型与检索的完整输入/输出必须留在磁盘文件，禁止在命令后追加 cat、完整 jq -r .text 或循环打印整份结果。每次终端回显控制在 4 KB 内，只查看必要字段、计数或分段摘要；需要转换大 JSON 时直接由脚本读写文件。不得把大段工具输出回灌给编排 Agent。",
     ] : []),
     ...(config.engine?.mode === "gpu" ? [
@@ -2408,7 +2665,7 @@ function buildPrompt(config, jobDirectory, context = {}) {
     "资源约束: 不得把完整视频读入内存；音频以 5–10 分钟分块并保留 2–5 秒重叠；子进程与转写结果直接落盘。",
     `精修数据: 完成字幕后额外写出 ${path.join(jobDirectory, "work", "studio-review.json")}，JSON 结构为 {"roles":[{"id":"同一角色—声优对的稳定实体 ID","name":"当前字幕显示名","characterName":"角色名或空串","performerName":"声优/出演者名或空串","speakingAs":"character|performer|unknown","color":"#RRGGBB","colorSource":{"kind":"official|evidence|user|fallback","reference":"直接来源 URL、用户确认或回退规则"}}],"cues":[{"id":1,"start":0.0,"end":1.0,"speakerId":"...","source":"...","translation":"...","confidence":0.95,"flagged":false}]}。同一角色—声优对只能有一条 role；该文件只含文本和时间码，不嵌入媒体。`,
     "清单语义: manifest.limitations 只记录尚未解决且会实质影响字幕语义、可读性、媒体完整性或交付验收的问题。已经按约定成功使用的确定性角色色回退、已解决但为可选人工复看而保留 flagged=true 的句子，都写入 manifest.notices 与相应报告/精修数据，不得列为 limitation。",
-    "开始前读取 SKILL.md 及其直接引用的三个 reference。每开始一个阶段将 manifest 对应 status 写为 in_progress，每完成则写为 complete 并记录 evidence；无法继续写 blocked 和原因。完成后保留 SRT、ASS、封装视频和验证报告。",
+    `开始前读取 SKILL.md 及其直接引用的三个 reference。每开始一个阶段通过 ${manifestHelperPath} 将 manifest 对应 status 更新为 in_progress，每完成则原子更新为 complete 并记录 evidence；无法继续写 blocked 和原因。不得直接写 manifest。完成后保留 SRT、ASS、封装视频和验证报告。`,
   ].join("\n");
 }
 
@@ -2465,7 +2722,8 @@ function adapterArguments(name, config, prompt, searchAgentConfig = { codexArgs:
   throw new Error(`不支持的 Agent: ${name}`);
 }
 
-async function launchJob(config) {
+async function launchJob(inputConfig) {
+  let config = structuredClone(inputConfig);
   const kind = sourceKind(config.source);
   if (kind === "unknown") throw new Error("无法识别视频位置，请使用本地完整路径或 yt-dlp 支持的网页链接。 ");
   if (!String(config.outputPath || "").trim()) throw new Error("输出路径不能为空。 ");
@@ -2475,6 +2733,15 @@ async function launchJob(config) {
   if (!transcriptionCheck.ready) {
     const missing = transcriptionCheck.components.filter((item) => item.status === "missing").map((item) => item.label).join("、");
     throw new Error(`听写环境尚未准备：${missing || transcriptionCheck.recommendation}。请先在“原文听写引擎”中检查环境，按需下载或关闭未准备的增强项。`);
+  }
+  const transcriptionPreflight = await runTaskTranscriptionPreflight(config.transcription || {}, config.source);
+  if (config.transcription?.diarization !== false && transcriptionPreflight?.diarization?.status === "degraded") {
+    config.transcription = {
+      ...(config.transcription || {}),
+      diarizationRequested: true,
+      diarization: false,
+      diarizationDegraded: transcriptionPreflight.diarization.detail || "说话人分离未通过任务启动预检",
+    };
   }
   const id = randomUUID();
   const jobDirectory = safeJobDirectory(id);
@@ -2502,17 +2769,28 @@ async function launchJob(config) {
     ? await researchAgentConfig(jobDirectory, config.engine || {}, config.search || { provider: "exa" })
     : { env: selected.env, codexArgs: [], claudeArgs: [], description: "当前 Agent 自带检索" };
   selected.env = { ...selected.env, ...searchAgentConfig.env };
+  selected.env.PSS_MANIFEST_HELPER = manifestHelperPath;
+  selected.env.PSS_MANIFEST_PATH = path.join(jobDirectory, "manifest.json");
   if (config.transcription?.mode === "local" && config.transcription?.provider === "faster_whisper") {
     const paths = transcriptionPaths(config.transcription);
     selected.env.PSS_TRANSCRIPTION_PYTHON = transcriptionCheck.python;
     selected.env.PSS_TRANSCRIPTION_SCRIPT = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "transcribe_faster_whisper.py");
     selected.env.PSS_TRANSCRIPTION_MODEL_CACHE = paths.modelRoot;
-    if (config.transcription?.diarization) selected.env.PSS_TRANSCRIPTION_DIARIZATION_PYTHON = venvPython(paths.diarizationRuntimePath);
-    if (config.transcription?.diarization && String(config.transcription?.hfToken || "").trim()) selected.env.HF_TOKEN = String(config.transcription.hfToken).trim();
+    if (config.transcription?.diarization) {
+      selected.env.PSS_TRANSCRIPTION_DIARIZATION_ENGINE = diarizationEngine(config.transcription);
+      selected.env.PSS_TRANSCRIPTION_DIARIZATION_PYTHON = venvPython(paths.diarizationRuntimePath);
+      if (diarizationEngine(config.transcription) === "sherpa_onnx") {
+        const models = sherpaDiarizationModelPaths(paths);
+        selected.env.PSS_TRANSCRIPTION_DIARIZATION_SCRIPT = sherpaDiarizationPath;
+        selected.env.PSS_TRANSCRIPTION_DIARIZATION_SEGMENTATION_MODEL = models.segmentation;
+        selected.env.PSS_TRANSCRIPTION_DIARIZATION_EMBEDDING_MODEL = models.embedding;
+      }
+    }
+    if (config.transcription?.diarization && diarizationEngine(config.transcription) === "pyannote" && String(config.transcription?.hfToken || "").trim()) selected.env.HF_TOKEN = String(config.transcription.hfToken).trim();
   }
   const args = adapterArguments(selected.name, config, prompt, searchAgentConfig);
   await writeJsonFile(path.join(jobDirectory, "studio-job.json"), sanitizedConfig(config));
-  await writeJsonFile(path.join(jobDirectory, "manifest.json"), initialManifest(config));
+  await writeJsonFile(path.join(jobDirectory, "manifest.json"), initialManifest(config, transcriptionPreflight));
   const stateFile = path.join(jobDirectory, "job-state.json");
   const state = { id, status: "running", agent: selected.name, createdAt: new Date().toISOString(), message: "本地 Agent 已启动" };
   const outputLog = createWriteStream(path.join(jobDirectory, "logs", "agent.ndjson"), { flags: "a" });
@@ -2567,7 +2845,7 @@ async function launchJob(config) {
       finishedAt: new Date().toISOString(),
     });
   });
-  return { id, status: "running", jobDirectory, agent: selected.name };
+  return { id, status: "running", jobDirectory, agent: selected.name, transcriptionPreflight };
 }
 
 function processAlive(pid) {
@@ -2695,7 +2973,7 @@ function phaseBlocker(manifest, id) {
   const { limitations } = manifestPresentationNotes(manifest);
   let detail = String(phase.error || phase.reason || phase.detail || phase.message || limitations[0] || evidence.at(-1) || `阶段 ${id} 无法继续`);
   if (id === "source_transcript" && /faster-whisper|ctranslate2|whisperx/i.test(detail) && /not installed|missing|blocked/i.test(detail)) {
-    detail = "原文听写所需的 Faster-Whisper / CTranslate2 尚未安装；若启用了说话人分离，还需要 WhisperX。获取素材与背景预习成果已经保留，准备好听写环境后可从本阶段继续。";
+    detail = "原文听写所需的 Faster-Whisper / CTranslate2 尚未安装；若启用了说话人分离，还需要准备所选的本地分离引擎。获取素材与背景预习成果已经保留，准备好听写环境后可从本阶段继续。";
   }
   return {
     phase: id,
@@ -2787,9 +3065,24 @@ async function resumeJob(id, body) {
   const externalConsent = verifiedExternalProcessingConsent(config);
   const transcriptionCheck = await transcriptionEnvironment(config.transcription || {});
   if (!transcriptionCheck.ready) throw new Error(`听写环境尚未准备：${transcriptionCheck.recommendation}`);
+  const transcriptionPreflight = await runTaskTranscriptionPreflight(config.transcription || {}, config.source);
+  if (config.transcription?.diarization !== false && transcriptionPreflight?.diarization?.status === "degraded") {
+    config.transcription = {
+      ...(config.transcription || {}),
+      diarizationRequested: true,
+      diarization: false,
+      diarizationDegraded: transcriptionPreflight.diarization.detail || "说话人分离未通过任务启动预检",
+    };
+  }
   const validated = await validateResumeManifest(jobDirectory, existingManifest, config);
   if (!validated.resumeFrom) throw new Error("所有阶段均已完成，无需续跑");
   validated.manifest.external_processing = externalConsent;
+  validated.manifest.transcription_preflight = transcriptionPreflight;
+  if (transcriptionPreflight?.diarization?.status === "degraded") {
+    validated.manifest.notices ||= [];
+    const notice = `说话人分离已在续跑预检中降级：${transcriptionPreflight.diarization.detail || "本地分离引擎未通过"}；基础听写继续。`;
+    if (!validated.manifest.notices.includes(notice)) validated.manifest.notices.push(notice);
+  }
   if (externalConsent.required && externalConsent.granted) {
     const resolvedAuthorization = /authoriz|consent|授权|media-derived|external model service/i;
     validated.manifest.limitations = (Array.isArray(validated.manifest.limitations) ? validated.manifest.limitations : []).filter((item) => !resolvedAuthorization.test(String(item)));
@@ -2811,13 +3104,24 @@ async function resumeJob(id, body) {
     ? await researchAgentConfig(jobDirectory, config.engine || {}, config.search || { provider: "exa" })
     : { env: selected.env, codexArgs: [], claudeArgs: [], description: "当前 Agent 自带检索" };
   selected.env = { ...selected.env, ...searchAgentConfig.env };
+  selected.env.PSS_MANIFEST_HELPER = manifestHelperPath;
+  selected.env.PSS_MANIFEST_PATH = path.join(jobDirectory, "manifest.json");
   if (config.transcription?.mode === "local" && config.transcription?.provider === "faster_whisper") {
     const paths = transcriptionPaths(config.transcription);
     selected.env.PSS_TRANSCRIPTION_PYTHON = transcriptionCheck.python;
     selected.env.PSS_TRANSCRIPTION_SCRIPT = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "transcribe_faster_whisper.py");
     selected.env.PSS_TRANSCRIPTION_MODEL_CACHE = paths.modelRoot;
-    if (config.transcription?.diarization) selected.env.PSS_TRANSCRIPTION_DIARIZATION_PYTHON = venvPython(paths.diarizationRuntimePath);
-    if (config.transcription?.diarization && String(config.transcription?.hfToken || "").trim()) selected.env.HF_TOKEN = String(config.transcription.hfToken).trim();
+    if (config.transcription?.diarization) {
+      selected.env.PSS_TRANSCRIPTION_DIARIZATION_ENGINE = diarizationEngine(config.transcription);
+      selected.env.PSS_TRANSCRIPTION_DIARIZATION_PYTHON = venvPython(paths.diarizationRuntimePath);
+      if (diarizationEngine(config.transcription) === "sherpa_onnx") {
+        const models = sherpaDiarizationModelPaths(paths);
+        selected.env.PSS_TRANSCRIPTION_DIARIZATION_SCRIPT = sherpaDiarizationPath;
+        selected.env.PSS_TRANSCRIPTION_DIARIZATION_SEGMENTATION_MODEL = models.segmentation;
+        selected.env.PSS_TRANSCRIPTION_DIARIZATION_EMBEDDING_MODEL = models.embedding;
+      }
+    }
+    if (config.transcription?.diarization && diarizationEngine(config.transcription) === "pyannote" && String(config.transcription?.hfToken || "").trim()) selected.env.HF_TOKEN = String(config.transcription.hfToken).trim();
   }
   const args = adapterArguments(selected.name, config, prompt, searchAgentConfig);
   await writeJsonFile(path.join(jobDirectory, "studio-job.json"), sanitizedConfig(config));
@@ -2858,7 +3162,7 @@ async function resumeJob(id, body) {
     const blocker = blocked ? phaseBlocker(latestManifest, blocked) : null;
     await writeJsonFile(stateFile, { ...latestState, status: terminal, exitCode: code, signal, ...(terminal === "completed" ? { message: "任务已完成，等待精修" } : terminal === "blocked" ? { blocker, error: blocker.detail, message: `${blocker.label}：需要处理` } : { error: `Agent 退出，代码 ${code ?? "unknown"}` }), finishedAt: new Date().toISOString() });
   });
-  return { id, status: "running", resumeFrom: validated.resumeFrom, warnings: validated.warnings, attempt };
+  return { id, status: "running", resumeFrom: validated.resumeFrom, warnings: validated.warnings, attempt, transcriptionPreflight };
 }
 
 function normalizeStudioReview(review) {
@@ -2960,6 +3264,8 @@ async function jobStatus(id) {
   let score = 0;
   let currentPhase = "";
   let manifestChanged = false;
+  const manifestPhaseUpdates = {};
+  const phaseUpdate = (id) => (manifestPhaseUpdates[id] ||= { fields: {}, evidence: [] });
   const observedAt = new Date().toISOString();
   const previousStatuses = jobPhaseStatusCache.get(directory) || {};
   const observedStatuses = {};
@@ -2970,15 +3276,28 @@ async function jobStatus(id) {
     const raw = workflowPhaseStatus(id, phase);
     if (raw !== String(phase.status ?? "pending")) {
       phase.status = raw;
-      phase.evidence = [...(Array.isArray(phase.evidence) ? phase.evidence : []), "按当前疑点复核策略自动放行低风险项，任务继续进入字幕质检。"];
+      const evidence = "按当前疑点复核策略自动放行低风险项，任务继续进入字幕质检。";
+      phase.evidence = [...(Array.isArray(phase.evidence) ? phase.evidence : []), evidence];
+      phaseUpdate(id).fields.status = raw;
+      phaseUpdate(id).evidence.push(evidence);
       manifestChanged = true;
     }
     observedStatuses[id] = raw;
     const running = raw === "in_progress" || raw === "running";
     const terminal = ["complete", "completed", "blocked", "error", "skipped"].includes(String(raw));
-    if (running && !phase.started_at && !phase.startedAt) { phase.started_at = observedAt; phase.timing_source = "studio-observed"; manifestChanged = true; }
+    if (running && !phase.started_at && !phase.startedAt) {
+      phase.started_at = observedAt;
+      phase.timing_source = "studio-observed";
+      Object.assign(phaseUpdate(id).fields, { started_at: observedAt, timing_source: "studio-observed" });
+      manifestChanged = true;
+    }
     const wasRunning = ["in_progress", "running"].includes(String(previousStatuses[id] || ""));
-    if (terminal && wasRunning && !phase.finished_at && !phase.finishedAt && !phase.completed_at) { phase.finished_at = observedAt; phase.timing_source = "studio-observed"; manifestChanged = true; }
+    if (terminal && wasRunning && !phase.finished_at && !phase.finishedAt && !phase.completed_at) {
+      phase.finished_at = observedAt;
+      phase.timing_source = "studio-observed";
+      Object.assign(phaseUpdate(id).fields, { finished_at: observedAt, timing_source: "studio-observed" });
+      manifestChanged = true;
+    }
     const mapped = raw === "complete" || raw === "completed" ? "done" : raw === "in_progress" || raw === "running" ? "running" : raw === "blocked" ? "blocked" : raw === "error" ? "error" : raw === "skipped" ? "skipped" : "pending";
     phases[id] = mapped;
     const startedAt = phase.started_at || phase.startedAt || null;
@@ -2998,7 +3317,18 @@ async function jobStatus(id) {
     if (mapped === "error" || mapped === "blocked") currentPhase = id;
   }
   jobPhaseStatusCache.set(directory, observedStatuses);
-  if (manifestChanged) await writeJsonFile(path.join(directory, "manifest.json"), manifest);
+  if (manifestChanged) {
+    await updateJsonFile(path.join(directory, "manifest.json"), (current) => {
+      current.phases ||= {};
+      for (const [phaseId, update] of Object.entries(manifestPhaseUpdates)) {
+        const currentPhase = current.phases[phaseId] || { status: "pending", evidence: [] };
+        const evidence = Array.isArray(currentPhase.evidence) ? [...currentPhase.evidence] : [];
+        for (const item of update.evidence) if (!evidence.includes(item)) evidence.push(item);
+        current.phases[phaseId] = { ...currentPhase, ...update.fields, evidence };
+      }
+      return current;
+    }, manifest);
+  }
   const progress = effectiveState.status === "completed" ? 100 : Math.max(1, Math.round((score / phaseIds.length) * 100));
   const media = await resolveMedia(id);
   const resources = await jobResources(directory, effectiveState);
@@ -3011,6 +3341,7 @@ async function jobStatus(id) {
     phases,
     phaseDetails,
     reviewPolicy: manifest.review_policy || { ambiguities: "pragmatic" },
+    transcriptionPreflight: manifest.transcription_preflight || null,
     externalProcessingConsent: externalProcessingConsentStatus(storedConfig),
     progress,
     message: currentPhase ? phaseLabels[currentPhase] : effectiveState.message,
@@ -3252,10 +3583,13 @@ async function launchExport(id, body) {
   const refinementPath = path.join(directory, "work", "studio-refinements.json");
   const exportPath = path.join(directory, "work", "studio-export.json");
   await writeJsonFile(exportPath, sanitizedConfig(body));
-  for (const phase of ["subtitle_qc", "mux", "final_validation"]) {
-    manifest.phases[phase] = { ...(manifest.phases[phase] ?? {}), status: phase === "subtitle_qc" ? "in_progress" : "pending", evidence: [] };
-  }
-  await writeJsonFile(path.join(directory, "manifest.json"), manifest);
+  await updateJsonFile(path.join(directory, "manifest.json"), (current) => {
+    current.phases ||= {};
+    for (const phase of ["subtitle_qc", "mux", "final_validation"]) {
+      current.phases[phase] = { ...(current.phases[phase] ?? {}), status: phase === "subtitle_qc" ? "in_progress" : "pending", evidence: [] };
+    }
+    return current;
+  }, manifest);
   const prompt = [
     `严格遵守 ${harnessPath}，继续任务 ${directory}。`,
     `读取已人工精修的数据 ${refinementPath} 和导出设置 ${exportPath}。`,

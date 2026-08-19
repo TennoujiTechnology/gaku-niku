@@ -19,6 +19,9 @@ Produce a research-backed translation and a verified playable deliverable. Defau
 8. Preserve the original media and existing user files. Write into a new job directory and never overwrite without explicit approval.
 9. Do not claim completion until subtitle structure, media streams, duration, and a full-read integrity scan pass.
 10. Keep large model, search, transcript, and validation payloads on disk. Never print a complete result file back into the Agent transcript; terminal output for one inspection should stay under about 4 KB and contain only the fields or bounded excerpt needed for the next decision.
+11. Treat word alignment and speaker diarization as independent capabilities. The default local diarization route is Sherpa-ONNX with verified on-disk models; WhisperX / pyannote is an optional gated route. A successful import, an FFmpeg executable, or a non-empty token is not proof of real-audio readiness.
+12. Use the Studio-provided Manifest single-writer helper for every phase/artifact update. Submit a bounded JSON Merge Patch; never overwrite `manifest.json` directly. The helper must serialize writers and atomically replace the file.
+13. Send translation/review work as stable-ID item batches through the adaptive batch protocol. Size the first call below the output ceiling; if a child batch still reaches the limit, bisect only that child. Never regenerate an already valid sibling batch or the full transcript.
 
 ## Start every job
 
@@ -32,6 +35,8 @@ python3 {skill_dir}/scripts/check_environment.py SOURCE --strict
 ```
 
 Use the generated `manifest.json` as the single progress record. Update each phase from `pending` to `in_progress` to `complete`, recording paths and evidence. A failed phase remains `blocked`; do not skip it silently.
+
+Before launching the long-running Agent, complete the Studio transcription preflight and persist its structured result in `manifest.transcription_preflight`: execute FFmpeg/FFprobe on a bounded audio sample, run the selected Faster-Whisper model from the selected cache, and run the selected diarization engine on 16 kHz mono PCM audio. Prefer the Studio-managed Sherpa-ONNX runtime and verified local segmentation/embedding models; it requires no account. WhisperX / pyannote may be used only when explicitly selected and authorized. If either optional route fails, disable diarization for this task immediately and continue base ASR with `speaker_unknown`; do not enter an Agent retry loop.
 
 ## Workflow
 
@@ -87,6 +92,27 @@ Map the user's quality preset to real behavior:
 
 For online ASR, extract audio and upload only bounded 5–10 minute chunks. Do not upload the video container unless the chosen transcription endpoint explicitly requires it. For local ASR, choose a compute type compatible with the detected hardware and quality request; fail with a clear dependency/model message rather than silently falling back to a lower-quality engine.
 
+#### Local diarization readiness gate
+
+For the default Sherpa-ONNX route, use only the Studio-provided `PSS_TRANSCRIPTION_DIARIZATION_*` runtime, script and model paths. Convert each bounded audio chunk to 16 kHz mono PCM16 WAV, run the script, and preserve its anonymous `speaker_XX` turns in `work/diarization.json`. Do not download packages or models from inside the Agent. The Studio must verify the runtime imports, both on-disk model assets, FFmpeg conversion, and a real-audio inference before launch. A failed smoke test degrades immediately to `speaker_unknown` without invalidating Faster-Whisper output.
+
+Sherpa-ONNX clustering is not identity recognition. Never convert `speaker_00` into a character or performer solely from cluster order, voice embedding similarity, face appearance, subtitle colour, or a chat model guess. Bind a cluster only from a verified self-introduction, name card, stable known sample, or documented audiovisual evidence; otherwise retain `speaker_unknown`.
+
+#### WhisperX and pyannote advanced readiness gate
+
+When WhisperX speaker diarization is enabled, complete this gate before full-media transcription. Use the same Python runtime, model cache, native-library search path, proxy settings, and hardware backend that the real task will use:
+
+1. Validate `alignment` and `diarization` separately. Load the exact alignment model for the selected language and the exact pyannote diarization model revision; do not infer readiness from module imports.
+2. Verify required tokenizer/NLTK assets such as `punkt_tab` from the project runtime. Finish model and language-asset downloads before starting long transcription; do not install packages or fetch missing assets in the middle of a full-media pass.
+3. Validate authorization against the exact gated model repository without printing or persisting the secret. A non-empty token is not sufficient. An HTTP `401` or `403` is a terminal authorization failure, not a transient download error.
+4. Run a bounded 20–30 second real-audio smoke test through the requested alignment and diarization path. Import-only checks do not pass the gate. If the selected route depends on TorchCodec file decoding, verify it against the runtime's actual FFmpeg ABI. If the route intentionally passes a preloaded waveform and bypasses TorchCodec, record `torchcodec: bypassed`, not `ready`.
+
+Record capability results independently in the manifest: `alignment.status`, `alignment.engine`, `alignment.model`, `diarization.status`, `diarization.engine`, `diarization.model`, the smoke-test clip and result, authorization state (`verified`, `missing`, or `denied`) without the token, and any fallback. Do not write a single ambiguous `whisperx_ready=true` flag.
+
+Failure of optional diarization must not invalidate otherwise usable ASR. If the selected review policy permits continuation, keep the transcript, set uncertain and overlapping turns to `speaker_unknown`, record `diarization.status=degraded`, and send the affected cues to refinement. Report “alignment complete; diarization degraded”; never report “WhisperX complete” when pyannote did not run successfully.
+
+MFCC similarity, voice embeddings without a validated clustering/threshold protocol, face appearance, subtitle colour, or a chat model's guess are not equivalent to verified pyannote diarization. A heuristic fallback must be labeled `heuristic`, preserve unknown/overlap states, and must not force every segment onto a known person. Map a cluster to a linked speaker entity only from verified anchors or documented evidence; otherwise retain `speaker_unknown`. Speaker-only style uncertainty may proceed, but identity-sensitive dialogue remains flagged.
+
 Normalize to UTF-8 SRT while preserving the untouched original subtitle file. Split long media into 5–10 minute audio chunks; include overlap and reconcile duplicates by timestamp. Keep source transcription separate from translation.
 
 Request word-level timestamps when the transcriber supports them. For multi-speaker material, label speakers with diarization anchored by known self-introductions or other verified clean clips; visually review low-confidence turns instead of treating an anonymous cluster ID as identity. Resolve each cluster to a single linked speaker entity and choose its current `speaking_as`; do not create separate role-list entries for the character name and the corresponding performer name.
@@ -96,6 +122,8 @@ For every uncertain source cue, add a row to `work/uncertainties.tsv` with `time
 ### 4. Translate in context-preserving chunks
 
 Translate sequential chunks with the global research brief, glossary, speaker table, and the previous/next 2–5 cues visible. Preserve cue times unless the source timing is demonstrably wrong.
+
+For API-backed translation, submit cue objects with stable IDs through the Studio adaptive batch helper, including an estimated output-token cost per item. Merge returned `parts` by ID. A `length`/output-limit finish reason must shrink only the affected part; a single oversized cue is shortened manually and flagged instead of triggering a whole-batch retry.
 
 For each cue:
 
@@ -170,6 +198,8 @@ Report the final media path, external subtitle paths, actual resolution/codecs, 
 ## Recovery rules
 
 - If a downloader fails, preserve partial files and logs; retry the same phase after checking direct versus configured proxy.
+- Classify model and asset failures before retrying. Treat HTTP `401`/`403` as terminal with zero blind retries: ask the user to accept the gated model terms, replace the credential, or disable diarization. For `429`, honor `Retry-After`; for timeouts, incomplete downloads, and transient `5xx` responses, preserve the partial cache and allow at most two bounded automatic retries.
+- Retry only the failed asset download, model load, or bounded smoke stage. Never rerun the complete alignment/diarization pipeline in a loop, and never retranscribe already valid chunks merely because diarization failed.
 - If login is required, use the downloader's supported QR/browser flow and pause for user confirmation. Never paste raw cookies into commands.
 - If disk space is insufficient, report the estimated requirement and stop before downloading.
 - If the source has no usable audio or is DRM-protected, report the limitation; do not work around protection.

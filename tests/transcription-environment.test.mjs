@@ -46,7 +46,8 @@ test("transcription check is read-only and reports missing local dependencies", 
   assert.match(result.resources.downloadLabel, /GB|MB/);
   assert.equal(result.environmentRoot, path.join(bridge.root, "default-asr"));
   assert.equal(result.runtimePath, path.join(bridge.root, "default-asr", "runtimes", "base"));
-  assert.equal(result.diarizationRuntimePath, path.join(bridge.root, "default-asr", "runtimes", "diarization"));
+  assert.equal(result.diarizationRuntimePath, path.join(bridge.root, "default-asr", "runtimes", "diarization-sherpa-onnx"));
+  assert.equal(result.diarizationEngine, "sherpa_onnx");
   assert.equal(result.cachePath, path.join(bridge.root, "default-asr", "models"));
   assert.equal(result.storageLayout.mode, "project");
   assert.equal(result.diagnostics.healthy, false);
@@ -66,7 +67,7 @@ test("transcription check respects a user-selected project environment folder", 
   const result = await response.json();
   assert.equal(result.environmentRoot, environmentRoot);
   assert.equal(result.runtimePath, path.join(environmentRoot, "runtimes", "base"));
-  assert.equal(result.diarizationRuntimePath, path.join(environmentRoot, "runtimes", "diarization"));
+  assert.equal(result.diarizationRuntimePath, path.join(environmentRoot, "runtimes", "diarization-sherpa-onnx"));
   assert.equal(result.cachePath, path.join(environmentRoot, "models"));
 });
 

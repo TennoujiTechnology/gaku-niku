@@ -22983,6 +22983,7 @@
     const [transcriptionBaseUrl, setTranscriptionBaseUrl] = (0, import_react2.useState)("https://api.openai.com/v1");
     const [transcriptionLanguage, setTranscriptionLanguage] = (0, import_react2.useState)("ja");
     const [transcriptionDiarization, setTranscriptionDiarization] = (0, import_react2.useState)(false);
+    const [transcriptionDiarizationEngine, setTranscriptionDiarizationEngine] = (0, import_react2.useState)("sherpa_onnx");
     const [transcriptionHfToken, setTranscriptionHfToken] = (0, import_react2.useState)("");
     const [transcriptionWordTimestamps, setTranscriptionWordTimestamps] = (0, import_react2.useState)(true);
     const [transcriptionEnvironment, setTranscriptionEnvironment] = (0, import_react2.useState)(null);
@@ -23583,7 +23584,8 @@
         apiKey: transcriptionMode === "api" ? transcriptionApiKey : "",
         baseUrl: transcriptionMode === "api" ? transcriptionBaseUrl : "",
         diarization: transcriptionDiarization,
-        hfToken: transcriptionDiarization ? transcriptionHfToken : "",
+        diarizationEngine: transcriptionDiarizationEngine,
+        hfToken: transcriptionDiarization && transcriptionDiarizationEngine === "pyannote" ? transcriptionHfToken : "",
         wordTimestamps: transcriptionWordTimestamps,
         beamSize: transcriptionQualityPreset.beamSize,
         secondPass: transcriptionQuality === "maximum",
@@ -24616,6 +24618,7 @@
             baseUrl: projectSafeUrl(transcriptionBaseUrl),
             language: transcriptionLanguage,
             diarization: transcriptionDiarization,
+            diarizationEngine: transcriptionDiarizationEngine,
             wordTimestamps: transcriptionWordTimestamps,
             environmentRoot: transcriptionEnvironmentRoot
           },
@@ -24710,6 +24713,7 @@
         setTranscriptionBaseUrl(String(prepare.transcription.baseUrl || transcriptionPresets[importedTranscriptionProvider].baseUrl));
         setTranscriptionLanguage(String(prepare.transcription.language || "ja"));
         setTranscriptionDiarization(Boolean(prepare.transcription.diarization));
+        setTranscriptionDiarizationEngine(prepare.transcription.diarizationEngine === "pyannote" ? "pyannote" : "sherpa_onnx");
         setTranscriptionWordTimestamps(prepare.transcription.wordTimestamps !== false);
         setTranscriptionApiKey("");
         setTranscriptionHfToken("");
@@ -25353,16 +25357,28 @@
                       } }),
                       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
                         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u8BF4\u8BDD\u4EBA\u5206\u79BB" }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5728\u7EBF\u6A21\u578B\u53EF\u76F4\u63A5\u8FD4\u56DE\uFF1B\u672C\u5730\u6A21\u578B\u4F1A\u5355\u72EC\u68C0\u67E5 WhisperX \u4E0E\u6388\u6743\uFF0C\u4E0D\u5F71\u54CD\u57FA\u7840\u542C\u5199" })
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u672C\u5730\u9ED8\u8BA4\u4F7F\u7528\u65E0\u9700\u8D26\u53F7\u7684 Sherpa-ONNX\uFF1B\u5931\u8D25\u53EA\u964D\u7EA7\u8BF4\u8BDD\u4EBA\u6807\u7B7E\uFF0C\u4E0D\u5F71\u54CD\u57FA\u7840\u542C\u5199" })
                       ] })
                     ] })
                   ] }),
-                  transcriptionMode === "local" && transcriptionDiarization && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-hf-token", children: [
+                  transcriptionMode === "local" && transcriptionDiarization && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-diarization-engine", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "diarization-engine", children: "\u672C\u5730\u5206\u79BB\u5F15\u64CE" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { id: "diarization-engine", value: transcriptionDiarizationEngine, onChange: (event) => {
+                      setTranscriptionDiarizationEngine(event.target.value);
+                      setTranscriptionInstallDiarization(false);
+                      invalidateTranscriptionEnvironment();
+                    }, children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "sherpa_onnx", children: "Sherpa-ONNX\uFF08\u63A8\u8350 \xB7 \u65E0\u9700\u8D26\u53F7\uFF09" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "pyannote", children: "WhisperX / pyannote\uFF08\u9AD8\u7EA7 \xB7 \u9700 HF \u6743\u9650\uFF09" })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? "\u7EA6 47 MB \u672C\u5730\u6A21\u578B\uFF0CMac \u4E0E Windows \u5747\u53EF\u4F7F\u7528\uFF1B\u8F93\u51FA\u533F\u540D speaker_XX\uFF0C\u8EAB\u4EFD\u4ECD\u9700\u8BC1\u636E\u7ED1\u5B9A" : "\u9002\u5408\u5DF2\u6709 Hugging Face gated \u6A21\u578B\u6743\u9650\u7684\u7528\u6237\uFF1B401/403 \u4F1A\u7ACB\u5373\u964D\u7EA7\uFF0C\u4E0D\u8FDB\u5165\u957F\u91CD\u8BD5" })
+                  ] }),
+                  transcriptionMode === "local" && transcriptionDiarization && transcriptionDiarizationEngine === "pyannote" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-hf-token", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "hf-token", children: "Hugging Face Token" }),
                     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "hf-token", type: "password", autoComplete: "off", value: transcriptionHfToken, onChange: (event) => {
                       setTranscriptionHfToken(event.target.value);
                       invalidateTranscriptionEnvironment();
-                    }, placeholder: "\u7528\u4E8E\u8BF4\u8BDD\u4EBA\u5206\u79BB\u6A21\u578B\u6388\u6743\uFF1B\u53EA\u968F\u5F53\u524D\u8FD0\u884C\u4F20\u9012" }),
+                    }, placeholder: "\u7528\u4E8E pyannote \u6A21\u578B\u6388\u6743\uFF1B\u53EA\u968F\u5F53\u524D\u8FD0\u884C\u4F20\u9012" }),
                     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u8FD8\u9700\u5728 Hugging Face \u63A5\u53D7\u5BF9\u5E94\u6A21\u578B\u6761\u6B3E\u3002Token \u4E0D\u5199\u5165\u9879\u76EE\u6587\u4EF6\u6216\u8BCA\u65AD\u65E5\u5FD7\u3002" })
                   ] }),
                   transcriptionMode === "api" && !transcriptionApiKey.trim() && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "transcription-warning", children: "\u5F00\u59CB\u524D\u9700\u8981\u586B\u5199\u542C\u5199 API Key\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u590D\u7528\u7FFB\u8BD1\u6A21\u578B\u7684\u5BC6\u94A5\uFF0C\u907F\u514D\u8BEF\u4F20\u3002" }),
@@ -25449,7 +25465,7 @@
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "ready" }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u73AF\u5883\u9694\u79BB" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "ASR / WhisperX \u5206\u5F00" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "ASR / \u8BF4\u8BDD\u4EBA\u5206\u79BB\u72EC\u7ACB" }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: "\u5931\u8D25\u4E0D\u8986\u76D6\u53EF\u7528\u73AF\u5883" })
                             ] })
                           ] }),
@@ -25457,7 +25473,7 @@
                             transcriptionEnvironment.managedRuntime.isolation,
                             "\u3002\u7248\u672C\u6307\u7EB9\uFF1AASR ",
                             transcriptionEnvironment.managedRuntime.baseEnvironmentKey,
-                            " \xB7 WhisperX ",
+                            " \xB7 \u5206\u79BB\u5F15\u64CE ",
                             transcriptionEnvironment.managedRuntime.diarizationEnvironmentKey
                           ] })
                         ] }),
@@ -25578,14 +25594,14 @@
                                 ] })
                               ] })
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u5B89\u88C5 WhisperX \u8BF4\u8BDD\u4EBA\u5206\u79BB", htmlFor: "install-transcription-diarization", children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u5B89\u88C5\u672C\u5730\u8BF4\u8BDD\u4EBA\u5206\u79BB", htmlFor: "install-transcription-diarization", children: [
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-diarization", type: "checkbox", checked: transcriptionInstallDiarization, disabled: transcriptionEnvironment.installationCapabilities?.diarization === false, onChange: (event) => {
                                 setTranscriptionInstallDiarization(event.target.checked);
                                 setTranscriptionInstallConfirmed(false);
                               } }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "WhisperX \u8BF4\u8BDD\u4EBA\u5206\u79BB\uFF08\u9AD8\u7EA7\u53EF\u9009\uFF0C\u9ED8\u8BA4\u5173\u95ED\uFF09" }),
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionEnvironment.installationCapabilities?.diarization === false ? `\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u6258\u7BA1\u5DE5\u5177\u94FE\uFF0C\u4E14 ${transcriptionEnvironment.installationCapabilities.systemPython} \u4E0D\u6EE1\u8DB3 Python 3.10\u20133.13` : "\u4F7F\u7528\u72EC\u7ACB\u4E34\u65F6\u73AF\u5883\u5B89\u88C5\u5E76\u6DF1\u5EA6\u9A8C\u8BC1\uFF1B\u7CFB\u7EDF Python \u7248\u672C\u4E0D\u5408\u9002\u65F6\uFF0C\u7A0B\u5E8F\u4F1A\u81EA\u52A8\u51C6\u5907\u517C\u5BB9\u7248\u672C\uFF0C\u5931\u8D25\u4E0D\u4F1A\u7834\u574F\u57FA\u7840\u542C\u5199" })
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX \u672C\u5730\u8BF4\u8BDD\u4EBA\u5206\u79BB\uFF08\u63A8\u8350\uFF09" : "WhisperX / pyannote\uFF08\u9AD8\u7EA7\uFF09" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionEnvironment.installationCapabilities?.diarization === false ? `\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u6258\u7BA1\u5DE5\u5177\u94FE\uFF0C\u4E14 ${transcriptionEnvironment.installationCapabilities.systemPython} \u4E0D\u6EE1\u8DB3 Python 3.10\u20133.13` : transcriptionDiarizationEngine === "sherpa_onnx" ? "\u5B89\u88C5\u72EC\u7ACB CPU \u8FD0\u884C\u5E93\u5E76\u4E0B\u8F7D\u7EA6 47 MB \u6821\u9A8C\u6A21\u578B\uFF1B\u65E0\u9700\u8D26\u53F7\u6216 Hugging Face Token" : "\u4F7F\u7528\u72EC\u7ACB\u4E34\u65F6\u73AF\u5883\u5B89\u88C5\u5E76\u6DF1\u5EA6\u9A8C\u8BC1\uFF1B\u9700\u8981 Hugging Face gated \u6A21\u578B\u6743\u9650" })
                               ] })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u786E\u8BA4\u542C\u5199\u73AF\u5883\u4E0B\u8F7D", className: "transcription-install-confirm", htmlFor: "confirm-transcription-install", children: [

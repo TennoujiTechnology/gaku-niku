@@ -44,6 +44,7 @@ type EngineMode = "api" | "cli" | "gpu";
 type StudioMode = "easy" | "advanced";
 type PrepareStage = "engine" | "source" | "research" | "harness";
 type TranscriptionMode = "local" | "api";
+type DiarizationEngine = "sherpa_onnx" | "pyannote";
 type AmbiguityReviewMode = "fast" | "pragmatic" | "strict";
 type PhaseStatus = "pending" | "running" | "done" | "blocked" | "error" | "skipped";
 type JobRunStatus = "idle" | "running" | "blocked" | "failed" | "cancelled" | "completed";
@@ -123,7 +124,7 @@ type GakuNikuProjectV1 = {
     outputPath: string;
     formats: string[];
     engine: { mode: EngineMode; provider: string; model: string; baseUrl: string; cli: string; gpuModel: string; reasoning: string; proxyEnabled: boolean; proxyUrl: string };
-    transcription: { mode: TranscriptionMode; provider: string; quality: string; model: string; baseUrl: string; language: string; diarization: boolean; wordTimestamps: boolean; environmentRoot: string };
+    transcription: { mode: TranscriptionMode; provider: string; quality: string; model: string; baseUrl: string; language: string; diarization: boolean; diarizationEngine?: DiarizationEngine; wordTimestamps: boolean; environmentRoot: string };
     search: { provider: string; url: string };
     research: { keywords: string[]; sites: string[]; customSites: string; preview: string; knowledgeIds: string[]; title: string };
     harness: { text: string; confirmed: boolean; deliveryConstraints: string; ambiguityReviewMode: AmbiguityReviewMode };
@@ -879,6 +880,7 @@ export function SubtitleStudio() {
   const [transcriptionBaseUrl, setTranscriptionBaseUrl] = useState("https://api.openai.com/v1");
   const [transcriptionLanguage, setTranscriptionLanguage] = useState("ja");
   const [transcriptionDiarization, setTranscriptionDiarization] = useState(false);
+  const [transcriptionDiarizationEngine, setTranscriptionDiarizationEngine] = useState<DiarizationEngine>("sherpa_onnx");
   const [transcriptionHfToken, setTranscriptionHfToken] = useState("");
   const [transcriptionWordTimestamps, setTranscriptionWordTimestamps] = useState(true);
   const [transcriptionEnvironment, setTranscriptionEnvironment] = useState<TranscriptionEnvironment | null>(null);
@@ -1520,7 +1522,8 @@ export function SubtitleStudio() {
       apiKey: transcriptionMode === "api" ? transcriptionApiKey : "",
       baseUrl: transcriptionMode === "api" ? transcriptionBaseUrl : "",
       diarization: transcriptionDiarization,
-      hfToken: transcriptionDiarization ? transcriptionHfToken : "",
+      diarizationEngine: transcriptionDiarizationEngine,
+      hfToken: transcriptionDiarization && transcriptionDiarizationEngine === "pyannote" ? transcriptionHfToken : "",
       wordTimestamps: transcriptionWordTimestamps,
       beamSize: transcriptionQualityPreset.beamSize,
       secondPass: transcriptionQuality === "maximum",
@@ -2621,6 +2624,7 @@ export function SubtitleStudio() {
           baseUrl: projectSafeUrl(transcriptionBaseUrl),
           language: transcriptionLanguage,
           diarization: transcriptionDiarization,
+          diarizationEngine: transcriptionDiarizationEngine,
           wordTimestamps: transcriptionWordTimestamps,
           environmentRoot: transcriptionEnvironmentRoot,
         },
@@ -2718,6 +2722,7 @@ export function SubtitleStudio() {
       setTranscriptionBaseUrl(String(prepare.transcription.baseUrl || transcriptionPresets[importedTranscriptionProvider].baseUrl));
       setTranscriptionLanguage(String(prepare.transcription.language || "ja"));
       setTranscriptionDiarization(Boolean(prepare.transcription.diarization));
+      setTranscriptionDiarizationEngine(prepare.transcription.diarizationEngine === "pyannote" ? "pyannote" : "sherpa_onnx");
       setTranscriptionWordTimestamps(prepare.transcription.wordTimestamps !== false);
       setTranscriptionApiKey("");
       setTranscriptionHfToken("");
@@ -3027,9 +3032,10 @@ export function SubtitleStudio() {
                   {transcriptionMode === "api" && <div className="transcription-api-grid"><div><label className="field-label" htmlFor="transcription-key">听写 API Key</label><input id="transcription-key" type="password" autoComplete="off" value={transcriptionApiKey} onChange={(event) => { setTranscriptionApiKey(event.target.value); invalidateTranscriptionEnvironment(); }} placeholder="可与翻译 Key 不同；仅随任务启动传递" /></div><div><label className="field-label" htmlFor="transcription-base-url">听写 Base URL</label><input id="transcription-base-url" value={transcriptionBaseUrl} onChange={(event) => { setTranscriptionBaseUrl(event.target.value); invalidateTranscriptionEnvironment(); }} /></div></div>}
                   <div className="transcription-switches">
                     <label><input aria-label="启用词级时间戳" type="checkbox" checked={transcriptionWordTimestamps} onChange={(event) => setTranscriptionWordTimestamps(event.target.checked)} /><span><strong>词级时间戳</strong><small>用于让字幕从第一个词开始、最后一个词结束</small></span></label>
-                    <label><input aria-label="启用说话人分离" type="checkbox" checked={transcriptionDiarization} onChange={(event) => { setTranscriptionDiarization(event.target.checked); invalidateTranscriptionEnvironment(); }} /><span><strong>说话人分离</strong><small>在线模型可直接返回；本地模型会单独检查 WhisperX 与授权，不影响基础听写</small></span></label>
+                    <label><input aria-label="启用说话人分离" type="checkbox" checked={transcriptionDiarization} onChange={(event) => { setTranscriptionDiarization(event.target.checked); invalidateTranscriptionEnvironment(); }} /><span><strong>说话人分离</strong><small>本地默认使用无需账号的 Sherpa-ONNX；失败只降级说话人标签，不影响基础听写</small></span></label>
                   </div>
-                  {transcriptionMode === "local" && transcriptionDiarization && <div className="transcription-hf-token"><label className="field-label" htmlFor="hf-token">Hugging Face Token</label><input id="hf-token" type="password" autoComplete="off" value={transcriptionHfToken} onChange={(event) => { setTranscriptionHfToken(event.target.value); invalidateTranscriptionEnvironment(); }} placeholder="用于说话人分离模型授权；只随当前运行传递" /><small>还需在 Hugging Face 接受对应模型条款。Token 不写入项目文件或诊断日志。</small></div>}
+                  {transcriptionMode === "local" && transcriptionDiarization && <div className="transcription-diarization-engine"><label className="field-label" htmlFor="diarization-engine">本地分离引擎</label><select id="diarization-engine" value={transcriptionDiarizationEngine} onChange={(event) => { setTranscriptionDiarizationEngine(event.target.value as DiarizationEngine); setTranscriptionInstallDiarization(false); invalidateTranscriptionEnvironment(); }}><option value="sherpa_onnx">Sherpa-ONNX（推荐 · 无需账号）</option><option value="pyannote">WhisperX / pyannote（高级 · 需 HF 权限）</option></select><small>{transcriptionDiarizationEngine === "sherpa_onnx" ? "约 47 MB 本地模型，Mac 与 Windows 均可使用；输出匿名 speaker_XX，身份仍需证据绑定" : "适合已有 Hugging Face gated 模型权限的用户；401/403 会立即降级，不进入长重试"}</small></div>}
+                  {transcriptionMode === "local" && transcriptionDiarization && transcriptionDiarizationEngine === "pyannote" && <div className="transcription-hf-token"><label className="field-label" htmlFor="hf-token">Hugging Face Token</label><input id="hf-token" type="password" autoComplete="off" value={transcriptionHfToken} onChange={(event) => { setTranscriptionHfToken(event.target.value); invalidateTranscriptionEnvironment(); }} placeholder="用于 pyannote 模型授权；只随当前运行传递" /><small>还需在 Hugging Face 接受对应模型条款。Token 不写入项目文件或诊断日志。</small></div>}
                   {transcriptionMode === "api" && !transcriptionApiKey.trim() && <p className="transcription-warning">开始前需要填写听写 API Key；不会自动复用翻译模型的密钥，避免误传。</p>}
                   <section className="transcription-environment">
                     <div className="transcription-environment-heading">
@@ -3059,9 +3065,9 @@ export function SubtitleStudio() {
                         <div className="transcription-managed-runtime-grid">
                           <span><i className={transcriptionEnvironment.managedRuntime.uvReady ? "ready" : "pending"} /><small>工具链</small><strong>uv {transcriptionEnvironment.managedRuntime.uvVersion}</strong><em>{transcriptionEnvironment.managedRuntime.uvReady ? "已就绪" : transcriptionEnvironment.managedRuntime.supported ? "首次配置自动下载" : "兼容回退"}</em></span>
                           <span><i className={transcriptionEnvironment.managedRuntime.pythonReady ? "ready" : "pending"} /><small>Python</small><strong>{transcriptionEnvironment.managedRuntime.pythonVersion}</strong><em>{transcriptionEnvironment.managedRuntime.pythonReady ? "独立环境已就绪" : "由程序自动准备"}</em></span>
-                          <span><i className="ready" /><small>环境隔离</small><strong>ASR / WhisperX 分开</strong><em>失败不覆盖可用环境</em></span>
+                          <span><i className="ready" /><small>环境隔离</small><strong>ASR / 说话人分离独立</strong><em>失败不覆盖可用环境</em></span>
                         </div>
-                        <p>{transcriptionEnvironment.managedRuntime.isolation}。版本指纹：ASR {transcriptionEnvironment.managedRuntime.baseEnvironmentKey} · WhisperX {transcriptionEnvironment.managedRuntime.diarizationEnvironmentKey}</p>
+                        <p>{transcriptionEnvironment.managedRuntime.isolation}。版本指纹：ASR {transcriptionEnvironment.managedRuntime.baseEnvironmentKey} · 分离引擎 {transcriptionEnvironment.managedRuntime.diarizationEnvironmentKey}</p>
                       </div>}
                       {transcriptionEnvironment.storageLayout && <div className={`transcription-storage-layout ${transcriptionEnvironment.storageLayout.mode}`}><span>{transcriptionEnvironment.storageLayout.mode === "split" ? "已自动保护" : "项目内运行"}</span><div><strong>{transcriptionEnvironment.storageLayout.mode === "split" ? "外接盘保存模型，本机保存运行库" : "运行库和模型都可安全放在项目目录"}</strong><small>{transcriptionEnvironment.storageLayout.filesystem.toUpperCase()} · {transcriptionEnvironment.storageLayout.reason}</small></div></div>}
                       <p className={`transcription-recommendation ${transcriptionEnvironment.ready ? "ready" : "attention"}`}>{transcriptionEnvironment.ready ? "✓ " : ""}{transcriptionEnvironment.recommendation}</p>
@@ -3085,7 +3091,7 @@ export function SubtitleStudio() {
                           {(transcriptionInstallBusy || transcriptionInstallProgress > 0) && <div className={`transcription-install-progress ${transcriptionInstallProgress >= 100 ? "complete" : ""}`} aria-live="polite"><div><strong>{transcriptionInstallStage || "等待开始"}</strong><span>{Math.round(transcriptionInstallProgress)}%</span></div><progress max="100" value={transcriptionInstallProgress} /><ol><li className={transcriptionInstallProgress >= 6 ? "done" : "active"}>工具链</li><li className={transcriptionInstallProgress >= 10 ? "done" : ""}>独立 Python</li><li className={transcriptionInstallProgress >= 28 ? "done" : ""}>运行库</li><li className={transcriptionInstallProgress >= 55 ? "done" : ""}>模型</li><li className={transcriptionInstallProgress >= 92 ? "done" : ""}>验证</li></ol></div>}
                           <label aria-label="安装基础听写运行库" htmlFor="install-transcription-runtime"><input id="install-transcription-runtime" type="checkbox" checked={transcriptionInstallRuntime} disabled={transcriptionInstallModel && transcriptionEnvironment.components.find((item) => item.id === "runtime")?.status !== "ready"} onChange={(event) => { setTranscriptionInstallRuntime(event.target.checked); setTranscriptionInstallConfirmed(false); }} /><span><strong>基础听写运行库</strong><small>Faster-Whisper 与 CTranslate2，约 250 MB；缺失时是下载模型的必要项。若本机缺少 Python 3.11，首次还会准备约 80 MB 的独立运行环境</small></span></label>
                           <label aria-label={`下载 ${transcriptionModel} 模型`} htmlFor="install-transcription-model"><input id="install-transcription-model" type="checkbox" checked={transcriptionInstallModel} onChange={(event) => { const checked = event.target.checked; setTranscriptionInstallModel(checked); if (checked && transcriptionEnvironment.components.find((item) => item.id === "runtime")?.status !== "ready") setTranscriptionInstallRuntime(true); setTranscriptionInstallConfirmed(false); }} /><span><strong>下载 {transcriptionModel} 模型</strong><small>约 {transcriptionEnvironment.resources.downloadLabel}，保存到上方缓存位置</small></span></label>
-                          <label aria-label="安装 WhisperX 说话人分离" htmlFor="install-transcription-diarization"><input id="install-transcription-diarization" type="checkbox" checked={transcriptionInstallDiarization} disabled={transcriptionEnvironment.installationCapabilities?.diarization === false} onChange={(event) => { setTranscriptionInstallDiarization(event.target.checked); setTranscriptionInstallConfirmed(false); }} /><span><strong>WhisperX 说话人分离（高级可选，默认关闭）</strong><small>{transcriptionEnvironment.installationCapabilities?.diarization === false ? `当前平台没有托管工具链，且 ${transcriptionEnvironment.installationCapabilities.systemPython} 不满足 Python 3.10–3.13` : "使用独立临时环境安装并深度验证；系统 Python 版本不合适时，程序会自动准备兼容版本，失败不会破坏基础听写"}</small></span></label>
+                          <label aria-label="安装本地说话人分离" htmlFor="install-transcription-diarization"><input id="install-transcription-diarization" type="checkbox" checked={transcriptionInstallDiarization} disabled={transcriptionEnvironment.installationCapabilities?.diarization === false} onChange={(event) => { setTranscriptionInstallDiarization(event.target.checked); setTranscriptionInstallConfirmed(false); }} /><span><strong>{transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX 本地说话人分离（推荐）" : "WhisperX / pyannote（高级）"}</strong><small>{transcriptionEnvironment.installationCapabilities?.diarization === false ? `当前平台没有托管工具链，且 ${transcriptionEnvironment.installationCapabilities.systemPython} 不满足 Python 3.10–3.13` : transcriptionDiarizationEngine === "sherpa_onnx" ? "安装独立 CPU 运行库并下载约 47 MB 校验模型；无需账号或 Hugging Face Token" : "使用独立临时环境安装并深度验证；需要 Hugging Face gated 模型权限"}</small></span></label>
                           <label aria-label="确认听写环境下载" className="transcription-install-confirm" htmlFor="confirm-transcription-install"><input id="confirm-transcription-install" type="checkbox" checked={transcriptionInstallConfirmed} onChange={(event) => setTranscriptionInstallConfirmed(event.target.checked)} /><span><strong>我已确认下载内容、体积和保存位置</strong><small>只有勾选后才允许联网安装或下载；使用应用自己的运行目录，不修改系统 Python</small></span></label>
                           <button className="primary-install-button" disabled={!transcriptionEnvironment.installable || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || (!transcriptionInstallRuntime && !transcriptionInstallModel && !transcriptionInstallDiarization)} onClick={prepareTranscriptionEnvironment}>{transcriptionInstallBusy ? transcriptionInstallStage || "正在准备…" : "安全配置本地环境"}</button>
                           {transcriptionInstallEvents.length > 0 && <div className="transcription-install-log">{transcriptionInstallEvents.map((event, index) => <div className={event.kind} key={`${event.at}-${index}`}><i />{event.text}</div>)}</div>}

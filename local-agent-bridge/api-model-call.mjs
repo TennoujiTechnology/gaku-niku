@@ -15,11 +15,11 @@ const proxyUrl = String(process.env.PSS_PROXY_URL || "").trim();
 if (!baseUrl || !apiKey || !model) throw new Error("缺少 PSS_API_BASE_URL / PSS_API_KEY / PSS_API_MODEL");
 
 const endpoint = `${baseUrl}/chat/completions`;
-const messages = Array.isArray(input.messages)
+const baseMessages = Array.isArray(input.messages)
   ? input.messages
   : [{ role: "user", content: String(input.prompt || "") }];
 if (!["openai", "xai", "deepseek", "kimi", "kimi_intl", "mimo", "glm"].includes(provider) && process.env.PSS_REASONING_EFFORT) {
-  messages.unshift({ role: "system", content: `思考强度偏好：${process.env.PSS_REASONING_EFFORT}。疑难专名与语境必须充分核证后回答。` });
+  baseMessages.unshift({ role: "system", content: `思考强度偏好：${process.env.PSS_REASONING_EFFORT}。疑难专名与语境必须充分核证后回答。` });
 }
 const effort = process.env.PSS_REASONING_EFFORT || "medium";
 function reasoningFields() {
@@ -31,26 +31,11 @@ function reasoningFields() {
   if (provider === "glm") return { thinking: { type: "enabled" }, reasoning_effort: effort === "xhigh" ? "max" : effort };
   return {};
 }
-const tokenField = ["openai", "kimi", "kimi_intl", "mimo"].includes(provider)
-  ? { max_completion_tokens: Number(input.maxTokens || 6000) }
-  : { max_tokens: Number(input.maxTokens || 6000) };
-const response = await fetch(endpoint, {
-  method: "POST",
-  headers: { authorization: `Bearer ${apiKey}`, ...(provider === "mimo" ? { "api-key": apiKey } : {}), "content-type": "application/json" },
-  body: JSON.stringify({
-    model,
-    messages,
-    stream: false,
-    ...reasoningFields(),
-    ...tokenField,
-  }),
-  signal: AbortSignal.timeout(120_000),
-  ...(proxyUrl ? { dispatcher: new ProxyAgent(proxyUrl) } : {}),
-});
-const responseText = await response.text();
-let data;
-try { data = JSON.parse(responseText); } catch { data = { raw: responseText.slice(0, 4000) }; }
-if (!response.ok) throw new Error(data?.error?.message || data?.base_resp?.status_msg || `API HTTP ${response.status}`);
+function tokenFields(maxTokens) {
+  return ["openai", "kimi", "kimi_intl", "mimo"].includes(provider)
+    ? { max_completion_tokens: maxTokens }
+    : { max_tokens: maxTokens };
+}
 
 function extract(value) {
   if (!value) return "";
@@ -88,6 +73,110 @@ function tokenUsage(value) {
   };
 }
 
-const text = extract(data).trim();
-if (!text) throw new Error("模型没有返回文本");
-await writeFile(outputPath, `${JSON.stringify({ text, model: data.model || model, tokenUsage: tokenUsage(data?.usage) }, null, 2)}\n`, "utf8");
+function mergeUsage(...values) {
+  const valid = values.filter(Boolean);
+  return {
+    input: valid.reduce((sum, value) => sum + Number(value.input || 0), 0),
+    cachedInput: valid.reduce((sum, value) => sum + Number(value.cachedInput || 0), 0),
+    output: valid.reduce((sum, value) => sum + Number(value.output || 0), 0),
+    total: valid.reduce((sum, value) => sum + Number(value.total || 0), 0),
+    available: valid.some((value) => value.available),
+    cacheAvailable: valid.some((value) => value.cacheAvailable),
+  };
+}
+
+async function requestModel(messages, maxTokens) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, ...(provider === "mimo" ? { "api-key": apiKey } : {}), "content-type": "application/json" },
+    body: JSON.stringify({ model, messages, stream: false, ...reasoningFields(), ...tokenFields(maxTokens) }),
+    signal: AbortSignal.timeout(Number(input.timeoutMs || 120_000)),
+    ...(proxyUrl ? { dispatcher: new ProxyAgent(proxyUrl) } : {}),
+  });
+  const responseText = await response.text();
+  let data;
+  try { data = JSON.parse(responseText); } catch { data = { raw: responseText.slice(0, 4000) }; }
+  if (!response.ok) throw new Error(data?.error?.message || data?.base_resp?.status_msg || `API HTTP ${response.status}`);
+  const text = extract(data).trim();
+  if (!text) throw new Error("模型没有返回文本");
+  return {
+    text,
+    model: data.model || model,
+    tokenUsage: tokenUsage(data?.usage),
+    finishReason: String(data?.choices?.[0]?.finish_reason || data?.stop_reason || data?.finish_reason || "unknown"),
+  };
+}
+
+function itemId(item, index) {
+  if (item && typeof item === "object" && item.id != null) return String(item.id);
+  return String(index);
+}
+
+async function adaptiveBatch(items, maxTokens) {
+  const instruction = String(input.batchInstruction || "逐项处理输入，并返回包含相同 id 的 JSON 结果。不得遗漏、合并或重排条目。");
+  const system = String(input.batchSystem || "你正在处理视频字幕的一个有界批次。输出必须简洁、结构完整并保留每项 id。");
+  const estimatedPerItem = Math.max(32, Number(input.estimatedOutputTokensPerItem || 220));
+  const safeBudget = Math.max(256, Math.floor(maxTokens * 0.72));
+  const estimatedSize = Math.max(1, Math.floor(safeBudget / estimatedPerItem));
+  const maxItemsPerCall = Math.max(1, Number(input.maxItemsPerCall || 40));
+  const initialSize = Math.max(1, Math.min(items.length, maxItemsPerCall, estimatedSize));
+  const parts = [];
+  const allUsage = [];
+  let requestCount = 0;
+
+  async function processPart(part, offset, depth = 0) {
+    const messages = [
+      ...baseMessages,
+      { role: "system", content: system },
+      { role: "user", content: `${instruction}\n\nINPUT_ITEMS_JSON:\n${JSON.stringify(part)}` },
+    ];
+    requestCount += 1;
+    const result = await requestModel(messages, maxTokens);
+    allUsage.push(result.tokenUsage);
+    const nearLimit = /length|max_tokens|max_output_tokens/i.test(result.finishReason)
+      || (result.tokenUsage.available && result.tokenUsage.output >= maxTokens * 0.88);
+    if (nearLimit) {
+      if (part.length <= 1) throw new Error(`单条模型输出已达到上限（id=${itemId(part[0], offset)}）；请缩短该条上下文，而不是重试整批`);
+      const middle = Math.ceil(part.length / 2);
+      await processPart(part.slice(0, middle), offset, depth + 1);
+      await processPart(part.slice(middle), offset + middle, depth + 1);
+      return;
+    }
+    parts.push({
+      index: parts.length,
+      offset,
+      count: part.length,
+      itemIds: part.map((item, index) => itemId(item, offset + index)),
+      text: result.text,
+      finishReason: result.finishReason,
+      tokenUsage: result.tokenUsage,
+      splitDepth: depth,
+    });
+  }
+
+  for (let offset = 0; offset < items.length; offset += initialSize) {
+    await processPart(items.slice(offset, offset + initialSize), offset);
+  }
+  parts.sort((left, right) => left.offset - right.offset);
+  return {
+    text: parts.map((part) => part.text).join("\n"),
+    model: model,
+    tokenUsage: mergeUsage(...allUsage),
+    parts,
+    adaptiveBatch: {
+      enabled: true,
+      itemCount: items.length,
+      initialBatchSize: initialSize,
+      safeOutputBudget: safeBudget,
+      estimatedOutputTokensPerItem: estimatedPerItem,
+      calls: requestCount,
+      completedParts: parts.length,
+    },
+  };
+}
+
+const maxTokens = Math.max(256, Number(input.maxTokens || 6000));
+const output = Array.isArray(input.batchItems) && input.batchItems.length
+  ? await adaptiveBatch(input.batchItems, maxTokens)
+  : await requestModel(baseMessages, maxTokens);
+await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");

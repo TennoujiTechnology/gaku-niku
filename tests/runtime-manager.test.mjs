@@ -44,6 +44,11 @@ test("runtime manifest pins tools and every supported uv archive checksum", asyn
     assert.ok(environment.packages.length > 0);
     assert.ok(environment.packages.every((item) => item.includes("==")), `unversioned package in ${JSON.stringify(environment.packages)}`);
   }
+  for (const asset of Object.values(manifest.environments["diarization-sherpa"].models)) {
+    assert.match(asset.url, /^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\//);
+    assert.match(asset.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(asset.bytes > 1_000_000);
+  }
   assert.match(managedUvPath("/tmp/pss", manifest, "win32", "x64"), /windows-x64[\\/]uv\.exe$/);
 });
 
@@ -51,7 +56,8 @@ test("environment fingerprints are deterministic and order independent", async (
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const packages = manifest.environments["asr-base"].packages;
   assert.equal(runtimeEnvironmentKey(packages), runtimeEnvironmentKey(packages.slice().reverse()));
-  assert.notEqual(runtimeEnvironmentKey(packages), runtimeEnvironmentKey(manifest.environments.diarization.packages));
+  assert.notEqual(runtimeEnvironmentKey(packages), runtimeEnvironmentKey(manifest.environments["diarization-sherpa"].packages));
+  assert.notEqual(runtimeEnvironmentKey(manifest.environments["diarization-sherpa"].packages), runtimeEnvironmentKey(manifest.environments["diarization-pyannote"].packages));
 });
 
 test("a valid managed base Python can prepare WhisperX even when system Python is too old", () => {

@@ -84,7 +84,8 @@ test("ships the real harness and low-memory local bridge", async () => {
     "立即配置缺失环境",
     "已下载的模型不会重复下载",
     "安全配置本地环境",
-    "WhisperX 说话人分离（高级可选，默认关闭）",
+    "Sherpa-ONNX 本地说话人分离（推荐）",
+    "WhisperX / pyannote（高级 · 需 HF 权限）",
     "本次配置为什么没有完成",
     "让第一步模型辅助分析",
     "模型只读取脱敏检查结果",
@@ -229,7 +230,8 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(bridge, /\.staging-\$\{operation\.id\}/);
   assert.match(bridge, /UV_LINK_MODE: "copy"/);
   assert.match(bridge, /modelFile\.size > 10_000_000/);
-  assert.match(bridge, /WhisperX 需要 Python 3\.10–3\.13/);
+  assert.match(bridge, /需要 Python 3\.10–3\.13/);
+  assert.match(bridge, /Sherpa-ONNX 本地说话人分离真实推理预检/);
   assert.match(bridge, /模块首次加载超过/);
   assert.match(bridge, /验证基础运行库/);
   assert.match(bridge, /\/api\/transcription\/check/);
