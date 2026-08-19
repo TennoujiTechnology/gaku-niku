@@ -69,13 +69,22 @@ function extract(value) {
 
 function tokenUsage(value) {
   const input = Number(value?.prompt_tokens ?? value?.input_tokens ?? 0);
+  const cachedInputValue = value?.cached_input_tokens
+    ?? value?.input_cached_tokens
+    ?? value?.prompt_cache_hit_tokens
+    ?? value?.prompt_tokens_details?.cached_tokens
+    ?? value?.input_tokens_details?.cached_tokens
+    ?? value?.cache_read_input_tokens;
+  const cachedInput = Number(cachedInputValue ?? 0);
   const output = Number(value?.completion_tokens ?? value?.output_tokens ?? 0);
   const total = Number(value?.total_tokens ?? input + output);
   return {
     input: Number.isFinite(input) ? Math.max(0, input) : 0,
+    cachedInput: Number.isFinite(cachedInput) ? Math.max(0, Math.min(cachedInput, input)) : 0,
     output: Number.isFinite(output) ? Math.max(0, output) : 0,
     total: Number.isFinite(total) ? Math.max(0, total) : 0,
     available: Boolean(value) && typeof value === "object" && ["prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens"].some((key) => key in value),
+    cacheAvailable: cachedInputValue !== undefined && cachedInputValue !== null,
   };
 }
 

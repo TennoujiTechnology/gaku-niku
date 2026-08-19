@@ -18,6 +18,8 @@ import {
   CheckCircle,
   CursorClick,
   FilmStrip,
+  FloppyDisk,
+  FolderOpen,
   Gauge,
   Hand,
   MagnifyingGlass,
@@ -32,12 +34,16 @@ const BRIDGE_URL = "http://127.0.0.1:43127";
 const DEFAULT_DELIVERY_CONSTRAINTS = "最多两行、无多余句末句号、说话起止严格贴合、角色色描边发光、OCR 抽帧检查。";
 const MAX_REVIEW_HISTORY = 100;
 const REVIEW_EDIT_COALESCE_MS = 850;
+const PROJECT_FILE_FORMAT = "gakuniku-project";
+const PROJECT_FILE_VERSION = 1;
+const MAX_PROJECT_FILE_BYTES = 12 * 1024 * 1024;
 
 type Workspace = "prepare" | "running" | "review";
 type EngineMode = "api" | "cli" | "gpu";
 type StudioMode = "easy" | "advanced";
 type PrepareStage = "engine" | "source" | "research" | "harness";
 type TranscriptionMode = "local" | "api";
+type AmbiguityReviewMode = "fast" | "pragmatic" | "strict";
 type PhaseStatus = "pending" | "running" | "done" | "blocked" | "error" | "skipped";
 
 type Role = {
@@ -85,6 +91,37 @@ type ReviewSnapshot = {
 type ReviewHistory = {
   past: ReviewSnapshot[];
   future: ReviewSnapshot[];
+};
+
+type GakuNikuProjectV1 = {
+  format: "gakuniku-project";
+  version: 1;
+  appVersion: string;
+  savedAt: string;
+  workspace: Workspace;
+  job: { id: string } | null;
+  prepare: {
+    studioMode: StudioMode;
+    cameraFocus: PrepareStage;
+    source: string;
+    outputPath: string;
+    formats: string[];
+    engine: { mode: EngineMode; provider: string; model: string; baseUrl: string; cli: string; gpuModel: string; reasoning: string; proxyEnabled: boolean; proxyUrl: string };
+    transcription: { mode: TranscriptionMode; provider: string; quality: string; model: string; baseUrl: string; language: string; diarization: boolean; wordTimestamps: boolean; environmentRoot: string };
+    search: { provider: string; url: string };
+    research: { keywords: string[]; sites: string[]; customSites: string; preview: string; knowledgeIds: string[]; title: string };
+    harness: { text: string; confirmed: boolean; deliveryConstraints: string; ambiguityReviewMode: AmbiguityReviewMode };
+    execution: { showTrace: boolean };
+  };
+  review: {
+    roles: Role[];
+    cues: Cue[];
+    selectedCueId: number;
+    currentTime: number;
+    timelineZoom: number;
+    style: { fontFamily: string; fontSize: number; fontWeight: number; outline: number; glow: number; shadow: number };
+    layout: { inspectorWidth: number; previewWorkspaceHeight: number; timelineHeight: number; sentenceEditorWidth: number };
+  };
 };
 
 type ReviewEditOptions = {
@@ -181,9 +218,11 @@ type EngineTestResult = {
 
 type TokenUsage = {
   input: number;
+  cachedInput: number;
   output: number;
   total: number;
   available: boolean;
+  cacheAvailable: boolean;
 };
 
 type TranscriptionEnvironment = {
@@ -248,7 +287,7 @@ type TranscriptionTestResult = {
   provider: string;
   model: string;
 };
-type PhaseDetail = { status: PhaseStatus; rawStatus: string; evidence: string[]; detail: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null };
+type PhaseDetail = { status: PhaseStatus; rawStatus: string; evidence: string[]; detail: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null; riskSummary?: Record<string, number> | null };
 type JobResources = { elapsedMs: number | null; diskBytes: number; diskLabel: string; attempt: number; process: null | { rssBytes: number; rssLabel: string; cpuPercent: number; memoryPercent: number; elapsed: string } };
 
 const embeddedApiPricing = apiPricingManifest as ApiPricingManifest;
@@ -422,12 +461,18 @@ const transcriptionQualityPresets = {
   maximum: { label: "极致复核", hint: "高质量模型 + 二次复核；最慢且资源消耗最高", localModel: "large-v3", onlineModel: "gpt-4o-transcribe-diarize", beamSize: 12 },
 } as const;
 
+const ambiguityReviewPresets: Record<AmbiguityReviewMode, { label: string; hint: string }> = {
+  fast: { label: "快速放行", hint: "只深查最关键的少量疑点，其余采用保守译法并留给精修台" },
+  pragmatic: { label: "适度放行（推荐）", hint: "只深查可能改变意思的内容；普通口癖、语气词和低影响差异自动放行" },
+  strict: { label: "逐项严格复核", hint: "逐项取证实质疑点，关键内容无法确认时允许暂停任务" },
+};
+
 const phaseDefinitions = [
   ["acquire", "获取素材", "最高授权画质与音轨"],
   ["research", "背景预习", "角色、称呼与专有名词"],
   ["source_transcript", "原文听写", "词级时间戳与说话人"],
   ["translate", "精准翻译", "语境优先的逐句本地化"],
-  ["resolve_ambiguities", "疑点复核", "跳转画面并执行 OCR"],
+  ["resolve_ambiguities", "疑点复核", "按影响分级，只深查关键内容"],
   ["subtitle_qc", "字幕质检", "两行、时序与可读性"],
   ["mux", "视频封装", "SRT / ASS / MKV / MP4"],
   ["final_validation", "最终验证", "逐流核验与抽帧检查"],
@@ -587,29 +632,34 @@ function formatElapsed(milliseconds: number | null | undefined) {
   return hours ? `${hours}时 ${minutes}分` : minutes ? `${minutes}分 ${remaining}秒` : `${remaining}秒`;
 }
 
-const emptyTokenUsage = (): TokenUsage => ({ input: 0, output: 0, total: 0, available: false });
+const emptyTokenUsage = (): TokenUsage => ({ input: 0, cachedInput: 0, output: 0, total: 0, available: false, cacheAvailable: false });
 
 function normalizedTokenUsage(value: unknown): TokenUsage {
   if (!value || typeof value !== "object") return emptyTokenUsage();
   const raw = value as Partial<TokenUsage>;
   const input = Number(raw.input || 0);
+  const cachedInput = Number(raw.cachedInput || 0);
   const output = Number(raw.output || 0);
   const total = Number(raw.total || input + output);
   const available = raw.available === true || input > 0 || output > 0 || total > 0;
   return {
     input: Number.isFinite(input) ? Math.max(0, input) : 0,
+    cachedInput: Number.isFinite(cachedInput) ? Math.max(0, Math.min(cachedInput, input)) : 0,
     output: Number.isFinite(output) ? Math.max(0, output) : 0,
     total: Number.isFinite(total) ? Math.max(0, total) : 0,
     available,
+    cacheAvailable: raw.cacheAvailable === true,
   };
 }
 
 function addTokenUsage(...values: unknown[]): TokenUsage {
   return values.map(normalizedTokenUsage).reduce<TokenUsage>((sum, value) => ({
     input: sum.input + value.input,
+    cachedInput: sum.cachedInput + value.cachedInput,
     output: sum.output + value.output,
     total: sum.total + value.total,
     available: sum.available || value.available,
+    cacheAvailable: sum.cacheAvailable || value.cacheAvailable,
   }), emptyTokenUsage());
 }
 
@@ -619,7 +669,10 @@ function formatTokenCount(value: number, available: boolean) {
 
 function estimateTokenCost(usage: TokenUsage, rule?: ApiPriceRule) {
   if (!usage.available || !rule) return null;
-  return (usage.input * rule.inputPerMillion + usage.output * rule.outputPerMillion) / 1_000_000;
+  const cachedInput = usage.cacheAvailable ? Math.min(usage.cachedInput, usage.input) : 0;
+  const uncachedInput = Math.max(0, usage.input - cachedInput);
+  const cachedInputRate = rule.cachedInputPerMillion ?? rule.inputPerMillion;
+  return (uncachedInput * rule.inputPerMillion + cachedInput * cachedInputRate + usage.output * rule.outputPerMillion) / 1_000_000;
 }
 
 function formatEstimatedCost(value: number | null, currency?: ApiPriceRule["currency"]) {
@@ -631,6 +684,40 @@ function formatEstimatedCost(value: number | null, currency?: ApiPriceRule["curr
 
 function formatPriceRate(value: number, currency: ApiPriceRule["currency"]) {
   return `${currency === "CNY" ? "¥" : "$"}${value.toLocaleString("zh-CN", { maximumFractionDigits: 6 })}`;
+}
+
+function parseProjectFile(value: unknown): GakuNikuProjectV1 {
+  if (!value || typeof value !== "object") throw new Error("项目文件不是有效的 JSON 对象");
+  const candidate = value as Partial<GakuNikuProjectV1>;
+  if (candidate.format !== PROJECT_FILE_FORMAT) throw new Error("这不是 GakuNiku 项目文件");
+  if (candidate.version !== PROJECT_FILE_VERSION) throw new Error(`暂不支持项目文件版本 ${String(candidate.version ?? "未知")}`);
+  if (!candidate.prepare || !candidate.review) throw new Error("项目文件缺少准备阶段或精修数据");
+  if (!Array.isArray(candidate.prepare.formats) || !Array.isArray(candidate.prepare.research?.keywords)) throw new Error("项目文件的准备阶段数据不完整");
+  if (!Array.isArray(candidate.review.roles) || !Array.isArray(candidate.review.cues)) throw new Error("项目文件的字幕数据不完整");
+  return candidate as GakuNikuProjectV1;
+}
+
+function projectDownloadName(source: string) {
+  const raw = source.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "GakuNiku-project";
+  const stem = raw.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "GakuNiku-project";
+  const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  return `${stem}-${stamp}.gakuniku`;
+}
+
+function projectSafeUrl(value: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    url.username = "";
+    url.password = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/key|token|secret|password|signature|credential|auth/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString();
+  } catch {
+    return raw.includes("@") ? "" : raw;
+  }
 }
 
 export function SubtitleStudio() {
@@ -726,6 +813,7 @@ export function SubtitleStudio() {
   const [harnessConfirmed, setHarnessConfirmed] = useState(false);
   const [deliveryConstraints, setDeliveryConstraints] = useState(DEFAULT_DELIVERY_CONSTRAINTS);
   const [confirmedDeliveryConstraints, setConfirmedDeliveryConstraints] = useState(DEFAULT_DELIVERY_CONSTRAINTS);
+  const [ambiguityReviewMode, setAmbiguityReviewMode] = useState<AmbiguityReviewMode>("pragmatic");
   const [testOpen, setTestOpen] = useState(false);
   const [testMessage, setTestMessage] = useState(DEFAULT_ENGINE_TEST_MESSAGE);
   const [testMessages, setTestMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
@@ -777,8 +865,11 @@ export function SubtitleStudio() {
   const [glow, setGlow] = useState(8);
   const [shadow, setShadow] = useState(3);
   const [saved, setSaved] = useState(true);
+  const [projectNotice, setProjectNotice] = useState("");
+  const [projectFileName, setProjectFileName] = useState("");
   const [reviewHistory, setReviewHistory] = useState<ReviewHistory>({ past: [], future: [] });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineScrollerRef = useRef<HTMLDivElement>(null);
   const timelineScrubPointerRef = useRef<number | null>(null);
@@ -1044,6 +1135,7 @@ export function SubtitleStudio() {
         setRunMessage(data.message ?? "处理中");
         if (data.phases) setPhaseStates(data.phases);
         if (data.phaseDetails) setPhaseDetails(data.phaseDetails);
+        if (["fast", "pragmatic", "strict"].includes(data.reviewPolicy?.ambiguities)) setAmbiguityReviewMode(data.reviewPolicy.ambiguities as AmbiguityReviewMode);
         if (data.resources) setJobResources(data.resources);
         setJobTokenUsage(normalizedTokenUsage(data.tokenUsage));
         if (Array.isArray(data.manifest?.limitations)) setManifestLimitations(data.manifest.limitations.map(String));
@@ -1267,7 +1359,6 @@ export function SubtitleStudio() {
       if (!transcriptionEnvironmentRoot.trim() && data.environmentRoot) setTranscriptionEnvironmentRoot(String(data.environmentRoot));
       setTranscriptionTestStage("idle");
       setTranscriptionTestResult(null);
-      setTranscriptionTestFingerprint("");
       const missing = Array.isArray(data.components) ? data.components.filter((item: { status: string }) => item.status === "missing").map((item: { id: string }) => item.id) : [];
       setTranscriptionInstallRuntime(missing.includes("runtime"));
       setTranscriptionInstallModel(missing.includes("model"));
@@ -1516,6 +1607,7 @@ export function SubtitleStudio() {
     setShadow(3);
     setDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS);
     setConfirmedDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS);
+    setAmbiguityReviewMode("pragmatic");
 
     const builtInHarness = harnessOriginal || harnessText;
     if (builtInHarness) {
@@ -2099,6 +2191,7 @@ export function SubtitleStudio() {
           },
           harnessText: harnessText && harnessText !== harnessOriginal ? harnessText : "",
           deliveryConstraints,
+          reviewPolicy: { version: 1, ambiguity: { mode: ambiguityReviewMode } },
           execution: { showTrace },
           subtitleStyle: { fontFamily, fontSize, fontWeight, outline, glow, shadow, maxLines: 2 },
         }),
@@ -2123,7 +2216,7 @@ export function SubtitleStudio() {
       const response = await fetch(`${BRIDGE_URL}/api/jobs/${jobId}/resume`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ engine: enginePayload(), transcription: transcriptionPayload(), search: searchPayload(), execution: { showTrace } }),
+        body: JSON.stringify({ engine: enginePayload(), transcription: transcriptionPayload(), search: searchPayload(), reviewPolicy: { version: 1, ambiguity: { mode: ambiguityReviewMode } }, execution: { showTrace } }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "无法继续任务");
@@ -2155,6 +2248,179 @@ export function SubtitleStudio() {
     }
     setSaved(true);
     return true;
+  }
+
+  function currentProjectSnapshot(): GakuNikuProjectV1 {
+    return {
+      format: PROJECT_FILE_FORMAT,
+      version: PROJECT_FILE_VERSION,
+      appVersion: "0.2.0",
+      savedAt: new Date().toISOString(),
+      workspace,
+      job: jobId ? { id: jobId } : null,
+      prepare: {
+        studioMode,
+        cameraFocus,
+        source,
+        outputPath,
+        formats,
+        engine: { mode: engineMode, provider, model, baseUrl: projectSafeUrl(baseUrl), cli, gpuModel, reasoning, proxyEnabled, proxyUrl: projectSafeUrl(proxyUrl) },
+        transcription: {
+          mode: transcriptionMode,
+          provider: transcriptionProvider,
+          quality: transcriptionQuality,
+          model: transcriptionModel,
+          baseUrl: projectSafeUrl(transcriptionBaseUrl),
+          language: transcriptionLanguage,
+          diarization: transcriptionDiarization,
+          wordTimestamps: transcriptionWordTimestamps,
+          environmentRoot: transcriptionEnvironmentRoot,
+        },
+        search: { provider: searchProvider, url: projectSafeUrl(searchMcpUrl) },
+        research: { keywords, sites: selectedSites, customSites, preview: researchPreview, knowledgeIds, title: knowledgeTitle },
+        harness: { text: harnessText, confirmed: harnessConfirmed, deliveryConstraints, ambiguityReviewMode },
+        execution: { showTrace },
+      },
+      review: {
+        roles,
+        cues,
+        selectedCueId,
+        currentTime,
+        timelineZoom,
+        style: { fontFamily, fontSize, fontWeight, outline, glow, shadow },
+        layout: { inspectorWidth, previewWorkspaceHeight, timelineHeight, sentenceEditorWidth },
+      },
+    };
+  }
+
+  function saveStudioProject() {
+    try {
+      const snapshot = currentProjectSnapshot();
+      const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const downloadName = projectFileName.endsWith(".gakuniku") ? projectFileName : projectDownloadName(source);
+      anchor.href = href;
+      anchor.download = downloadName;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+      setProjectFileName(downloadName);
+      setProjectNotice(`项目已保存为 ${downloadName}；API Key 与访问令牌未写入文件`);
+      setSaved(true);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : "保存项目失败");
+    }
+  }
+
+  function requestOpenStudioProject() {
+    if (!saved && workspace === "review" && !window.confirm("当前精修内容尚未保存。仍要打开其他项目吗？")) return;
+    projectInputRef.current?.click();
+  }
+
+  async function handleProjectFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      if (file.size > MAX_PROJECT_FILE_BYTES) throw new Error("项目文件超过 12 MB，请确认没有误选视频或其他文件");
+      const project = parseProjectFile(JSON.parse(await file.text()));
+      const prepare = project.prepare;
+      const review = project.review;
+      const importedEngineMode = ["api", "cli", "gpu"].includes(prepare.engine.mode) ? prepare.engine.mode : "api";
+      const importedStudioMode = ["easy", "advanced"].includes(prepare.studioMode) ? prepare.studioMode : importedEngineMode === "api" ? "easy" : "advanced";
+      const importedCameraFocus = ["engine", "source", "research", "harness"].includes(prepare.cameraFocus) ? prepare.cameraFocus : "engine";
+      const importedTranscriptionProvider = prepare.transcription.provider in transcriptionPresets ? prepare.transcription.provider as keyof typeof transcriptionPresets : "faster_whisper";
+      const importedTranscriptionQuality = prepare.transcription.quality in transcriptionQualityPresets ? prepare.transcription.quality as keyof typeof transcriptionQualityPresets : "balanced";
+      const importedAmbiguityMode = ["fast", "pragmatic", "strict"].includes(prepare.harness.ambiguityReviewMode) ? prepare.harness.ambiguityReviewMode : "pragmatic";
+      const temporaryCredentials = readCredentialStore(window.sessionStorage);
+      const persistentCredentials = readCredentialStore(window.localStorage);
+      const localCredential = temporaryCredentials.credentials[prepare.engine.provider] || persistentCredentials.credentials[prepare.engine.provider];
+      const clamp = (value: number, min: number, max: number, fallback: number) => Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+      const importedRoles = review.roles.filter((item) => item && typeof item.id === "string" && typeof item.name === "string" && /^#[0-9a-f]{6}$/i.test(item.color));
+      const importedCues = review.cues.filter((item) => item && Number.isFinite(item.id) && Number.isFinite(item.start) && Number.isFinite(item.end)).map((item) => normalizeReviewCue(item));
+
+      if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+      resetReviewHistory();
+      setStudioMode(importedStudioMode);
+      setCameraFocus(importedCameraFocus);
+      setSource(String(prepare.source || ""));
+      setPreviewUrl(project.job?.id ? `${BRIDGE_URL}/api/jobs/${project.job.id}/media` : "");
+      setOutputPath(String(prepare.outputPath || "~/Movies/Precision Subtitles"));
+      setFormats(prepare.formats.map(String).filter(Boolean));
+      setEngineMode(importedEngineMode);
+      setProvider(String(prepare.engine.provider || "openai"));
+      setModel(String(prepare.engine.model || ""));
+      setBaseUrl(String(prepare.engine.baseUrl || ""));
+      setCli(String(prepare.engine.cli || "codex"));
+      setGpuModel(String(prepare.engine.gpuModel || "deepseek-r1:14b"));
+      setReasoning(String(prepare.engine.reasoning || "medium"));
+      setProxyEnabled(Boolean(prepare.engine.proxyEnabled));
+      setProxyUrl(String(prepare.engine.proxyUrl || ""));
+      setApiKey(localCredential?.apiKey || "");
+      setRememberApiKey(Boolean(persistentCredentials.credentials[prepare.engine.provider]?.apiKey));
+      setVerifiedEngine("");
+      setEngineVerificationRestored(false);
+      setTranscriptionMode(prepare.transcription.mode === "api" ? "api" : "local");
+      setTranscriptionProvider(importedTranscriptionProvider);
+      setTranscriptionQuality(importedTranscriptionQuality);
+      setTranscriptionModel(String(prepare.transcription.model || transcriptionPresets[importedTranscriptionProvider].models[0]));
+      setTranscriptionBaseUrl(String(prepare.transcription.baseUrl || transcriptionPresets[importedTranscriptionProvider].baseUrl));
+      setTranscriptionLanguage(String(prepare.transcription.language || "ja"));
+      setTranscriptionDiarization(Boolean(prepare.transcription.diarization));
+      setTranscriptionWordTimestamps(prepare.transcription.wordTimestamps !== false);
+      setTranscriptionApiKey("");
+      setTranscriptionHfToken("");
+      setTranscriptionEnvironmentRoot(String(prepare.transcription.environmentRoot || ""));
+      setTranscriptionEnvironment(null);
+      setSearchProvider(String(prepare.search.provider || "exa"));
+      setSearchMcpUrl(String(prepare.search.url || ""));
+      setSearchApiKey("");
+      setSearchTest({ stage: "idle", detail: "项目已恢复；如本机没有有效验证，请重新测试搜索工具" });
+      setKeywords(prepare.research.keywords.map(String).filter(Boolean));
+      setSelectedSites(prepare.research.sites.map(String).filter(Boolean));
+      setCustomSites(String(prepare.research.customSites || ""));
+      setResearchPreview(String(prepare.research.preview || ""));
+      setKnowledgeIds(prepare.research.knowledgeIds.map(String).filter(Boolean));
+      setKnowledgeTitle(String(prepare.research.title || ""));
+      setHarnessText(String(prepare.harness.text || harnessOriginal));
+      setHarnessConfirmed(Boolean(prepare.harness.confirmed && prepare.harness.text));
+      setHarnessConfirmedText(prepare.harness.confirmed ? String(prepare.harness.text || "") : "");
+      setDeliveryConstraints(String(prepare.harness.deliveryConstraints || DEFAULT_DELIVERY_CONSTRAINTS));
+      setConfirmedDeliveryConstraints(prepare.harness.confirmed ? String(prepare.harness.deliveryConstraints || DEFAULT_DELIVERY_CONSTRAINTS) : "");
+      setAmbiguityReviewMode(importedAmbiguityMode);
+      setShowTrace(prepare.execution.showTrace !== false);
+      setRoles(importedRoles.length ? importedRoles : initialRoles);
+      setCues(importedCues.length ? importedCues : initialCues);
+      const selectedId = importedCues.some((cue) => cue.id === review.selectedCueId) ? review.selectedCueId : importedCues[0]?.id || 1;
+      setSelectedCueId(selectedId);
+      setCurrentTime(clamp(review.currentTime, 0, Math.max(0, ...importedCues.map((cue) => cue.end)), 0));
+      setTimelineZoom(clamp(review.timelineZoom, 20, 200, 56));
+      setFontFamily(String(review.style.fontFamily || "Noto Sans CJK SC"));
+      setFontSize(clamp(review.style.fontSize, 18, 96, 42));
+      setFontWeight(clamp(review.style.fontWeight, 100, 900, 700));
+      setOutline(clamp(review.style.outline, 0, 8, 3));
+      setGlow(clamp(review.style.glow, 0, 20, 8));
+      setShadow(clamp(review.style.shadow, 0, 10, 3));
+      setInspectorWidth(clamp(review.layout.inspectorWidth, 260, 560, 305));
+      setPreviewWorkspaceHeight(clamp(review.layout.previewWorkspaceHeight, 300, 800, 470));
+      setTimelineHeight(clamp(review.layout.timelineHeight, 150, 360, 188));
+      setSentenceEditorWidth(clamp(review.layout.sentenceEditorWidth, 300, 620, 345));
+      setJobId(project.job?.id && /^[a-f0-9-]{36}$/i.test(project.job.id) ? project.job.id : "");
+      setPhaseStates(Object.fromEntries(phaseDefinitions.map(([id]) => [id, "pending"])));
+      setPhaseDetails({});
+      setRunError("");
+      setJobBlocker(null);
+      setProjectFileName(file.name);
+      setProjectNotice(`已打开 ${file.name}；密钥未从项目文件读取`);
+      setSaved(true);
+      const nextWorkspace = project.workspace === "running" && project.job?.id ? "running" : project.workspace === "review" ? "review" : "prepare";
+      setWorkspace(nextWorkspace);
+    } catch (error) {
+      setRunError(error instanceof Error ? `打开项目失败：${error.message}` : "打开项目失败");
+    }
   }
 
   async function exportProject() {
@@ -2242,15 +2508,23 @@ export function SubtitleStudio() {
         <div className="header-usage" aria-label="Token 使用统计">
           <span className="header-usage-title"><i />用量估算</span>
           <div><span>合计</span><strong>{formatTokenCount(displayedTokenUsage.total, displayedTokenUsage.available)} Token</strong></div>
+          <div className="billing-cache"><span>缓存命中</span><strong>{displayedTokenUsage.cacheAvailable ? `${formatTokenCount(displayedTokenUsage.cachedInput, true)} Token` : "未提供"}</strong></div>
           <div className="billing-cost"><span>费用</span><strong>{estimatedTokenCostLabel}</strong></div>
           <div><span>模型</span><strong>{activeEngineLabel}</strong></div>
         </div>
         <div className="header-actions">
+          <div className="project-file-actions" role="group" aria-label="项目文件">
+            <input ref={projectInputRef} className="visually-hidden" type="file" accept=".gakuniku,.json,application/json" onChange={(event) => void handleProjectFile(event)} />
+            <button type="button" title="打开 GakuNiku 项目文件" onClick={requestOpenStudioProject}><FolderOpen size={15} /><span>打开项目</span></button>
+            <button type="button" title="保存完整项目，不包含 API Key" onClick={saveStudioProject}><FloppyDisk size={15} /><span>保存项目</span></button>
+          </div>
           <div className={`bridge-pill ${bridgeStatus}`}>
             <i /> 后端{bridgeStatus === "online" ? "已连接" : bridgeStatus === "checking" ? "检查中" : "未连接"}
           </div>
         </div>
       </header>
+
+      {projectNotice && <div className="project-file-notice" role="status"><FloppyDisk size={15} /><span>{projectNotice}</span><button type="button" aria-label="关闭项目提示" onClick={() => setProjectNotice("")}>×</button></div>}
 
       {workspace === "prepare" && (
         <main className="prepare-page">
@@ -2523,6 +2797,12 @@ export function SubtitleStudio() {
                 <ol>
                   {phaseDefinitions.map(([, label], index) => <li key={label}><span>{index + 1}</span>{label}{index === 1 && <em>研究门槛</em>}</li>)}
                 </ol>
+                <label className="ambiguity-review-control">
+                  <span><strong>第 5 步 · 疑点复核强度</strong><small>{ambiguityReviewPresets[ambiguityReviewMode].hint}</small></span>
+                  <select aria-label="疑点复核强度" value={ambiguityReviewMode} onChange={(event) => setAmbiguityReviewMode(event.target.value as AmbiguityReviewMode)}>
+                    {Object.entries(ambiguityReviewPresets).map(([value, preset]) => <option value={value} key={value}>{preset.label}</option>)}
+                  </select>
+                </label>
                 <div className="harness-rule"><span>✓</span><label className="harness-rule-editor"><strong>成片约束 <em>{confirmedDeliveryConstraints === deliveryConstraints ? "已保存" : "待保存"}</em></strong><div><input aria-label="成片约束" value={deliveryConstraints} onChange={(event) => setDeliveryConstraints(event.target.value)} /><button type="button" disabled={!deliveryConstraints.trim() || confirmedDeliveryConstraints === deliveryConstraints} onClick={() => { const normalized = deliveryConstraints.trim(); setDeliveryConstraints(normalized); setConfirmedDeliveryConstraints(normalized); }}>{confirmedDeliveryConstraints === deliveryConstraints ? "已保存" : "保存"}</button></div></label></div>
             </section>
 
@@ -2565,12 +2845,12 @@ export function SubtitleStudio() {
                 const detail = phaseDetails[id];
                 return <button className={`phase-item ${status} ${selectedPhaseId === id ? "selected" : ""}`} key={id} title={detail?.detail || detail?.evidence?.at(-1) || ""} onClick={() => setSelectedPhaseId((current) => current === id ? "" : id)}>
                   <span className="phase-number">{status === "done" ? "✓" : index + 1}</span>
-                  <div><strong>{label}</strong><small>{detail?.detail || detail?.evidence?.at(-1) || description}</small>{detail?.durationMs != null && <em>{formatElapsed(detail.durationMs)}</em>}</div>
+                  <div><strong>{label}</strong><small>{detail?.detail || detail?.evidence?.at(-1) || description}</small>{id === "resolve_ambiguities" && detail?.riskSummary && <em>自动放行 {detail.riskSummary.auto_released || 0} · 重点复核 {detail.riskSummary.deep_reviewed || 0} · 留待精修 {detail.riskSummary.needs_refine || 0}</em>}{detail?.durationMs != null && <em>{formatElapsed(detail.durationMs)}</em>}</div>
                   <span className="phase-status">{statusLabel(status)}</span>
                 </button>;
               })}
             </div>
-            {selectedPhaseId && phaseDetails[selectedPhaseId] && <section className="phase-detail-panel"><header><strong>{phaseDefinitions.find(([id]) => id === selectedPhaseId)?.[1]}详情</strong><button onClick={() => setSelectedPhaseId("")}>×</button></header>{phaseDetails[selectedPhaseId].detail && <p>{phaseDetails[selectedPhaseId].detail}</p>}<div className="phase-detail-times"><span>开始：{phaseDetails[selectedPhaseId].startedAt ? new Date(phaseDetails[selectedPhaseId].startedAt!).toLocaleString() : "未记录"}</span><span>结束：{phaseDetails[selectedPhaseId].finishedAt ? new Date(phaseDetails[selectedPhaseId].finishedAt!).toLocaleString() : "未结束"}</span></div>{phaseDetails[selectedPhaseId].evidence.length > 0 && <div className="phase-evidence">{phaseDetails[selectedPhaseId].evidence.map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</div>}</section>}
+            {selectedPhaseId && phaseDetails[selectedPhaseId] && <section className="phase-detail-panel"><header><strong>{phaseDefinitions.find(([id]) => id === selectedPhaseId)?.[1]}详情</strong><button onClick={() => setSelectedPhaseId("")}>×</button></header>{phaseDetails[selectedPhaseId].detail && <p>{phaseDetails[selectedPhaseId].detail}</p>}{phaseDetails[selectedPhaseId].riskSummary && <div className="phase-risk-summary"><span>候选 {phaseDetails[selectedPhaseId].riskSummary?.total || 0}</span><span>重点复核 {phaseDetails[selectedPhaseId].riskSummary?.deep_reviewed || 0}</span><span>自动放行 {phaseDetails[selectedPhaseId].riskSummary?.auto_released || 0}</span><span>留待精修 {phaseDetails[selectedPhaseId].riskSummary?.needs_refine || 0}</span></div>}<div className="phase-detail-times"><span>开始：{phaseDetails[selectedPhaseId].startedAt ? new Date(phaseDetails[selectedPhaseId].startedAt!).toLocaleString() : "未记录"}</span><span>结束：{phaseDetails[selectedPhaseId].finishedAt ? new Date(phaseDetails[selectedPhaseId].finishedAt!).toLocaleString() : "未结束"}</span></div>{phaseDetails[selectedPhaseId].evidence.length > 0 && <div className="phase-evidence">{phaseDetails[selectedPhaseId].evidence.map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</div>}</section>}
             {showTrace && <section className="trace-panel"><div className="trace-heading"><strong>Agent 执行轨迹</strong><span>{trace.length ? "实时更新" : "等待模型输出"}</span></div><div className="trace-feed">{trace.length ? trace.map((event, index) => <div className={`trace-event ${event.kind}`} key={`${index}-${event.text}`}><i /> <span>{event.text}</span></div>) : <div className="trace-empty">任务启动后，这里会显示检索、读取、媒体处理和阶段摘要。</div>}</div></section>}
             {manifestLimitations.length > 0 && <section className="run-limitations"><strong>当前限制</strong>{manifestLimitations.map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</section>}
             {jobDiagnostics?.stderr?.length ? <details className="run-diagnostics"><summary>查看错误日志摘要</summary><pre>{jobDiagnostics.stderr.join("\n")}</pre><small>日志位置：{jobDiagnostics.logPath}</small></details> : null}
@@ -2589,7 +2869,7 @@ export function SubtitleStudio() {
               <button aria-label="撤回" title="撤回（⌘/Ctrl+Z）" disabled={!reviewHistory.past.length} onClick={undoReview}><ArrowCounterClockwise size={15} /><span>撤回</span></button>
               <button aria-label="重做" title="重做（⌘/Ctrl+Shift+Z 或 Ctrl+Y）" disabled={!reviewHistory.future.length} onClick={redoReview}><ArrowClockwise size={15} /><span>重做</span></button>
             </div>
-            <div className="review-actions"><span className={`save-state ${saved ? "saved" : "dirty"}`}>{saved ? "已保存" : "有未保存修改"}</span><button className="secondary-button" onClick={saveRefinements}>保存工程</button><button className="export-button" onClick={exportProject}>导出 / 封装 <span>⌄</span></button></div>
+            <div className="review-actions"><span className={`save-state ${saved ? "saved" : "dirty"}`}>{saved ? "已保存" : "有未保存修改"}</span><button className="secondary-button" onClick={saveRefinements}>同步精修</button><button className="export-button" onClick={exportProject}>导出 / 封装 <span>⌄</span></button></div>
           </div>
 
           {runError && <div className="review-notice notice error"><strong>提示</strong><span>{runError}</span><button onClick={() => setRunError("")}>×</button></div>}

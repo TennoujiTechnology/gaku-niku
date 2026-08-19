@@ -38,7 +38,7 @@ test("research preview uses the model selected in step one for planning and synt
       return jsonResponse(response, {
         model: "first-step-model",
         choices: [{ message: { content } }],
-        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 60 } },
       });
     }
     if (request.url === "/mcp") {
@@ -96,7 +96,7 @@ test("research preview uses the model selected in step one for planning and synt
     assert.equal(result.status, "completed", result.error);
     assert.match(result.generatedBy, /compatible\/first-step-model/);
     assert.match(result.document, /已核对的预习文档/);
-    assert.deepEqual(result.tokenUsage, { input: 200, output: 40, total: 240, available: true });
+    assert.deepEqual(result.tokenUsage, { input: 200, cachedInput: 120, output: 40, total: 240, available: true, cacheAvailable: true });
     assert.ok(result.events.some((event) => /网页打开失败.*继续/.test(event.text)));
     assert.deepEqual(calls, [
       "selected-model:plan",

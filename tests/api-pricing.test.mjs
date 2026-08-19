@@ -5,7 +5,8 @@ import test from "node:test";
 const manifest = JSON.parse(await readFile(new URL("../runtime/api-pricing.json", import.meta.url), "utf8"));
 
 function estimate(usage, rule) {
-  return (usage.input * rule.inputPerMillion + usage.output * rule.outputPerMillion) / 1_000_000;
+  const cachedInput = usage.cacheAvailable ? Math.min(usage.cachedInput, usage.input) : 0;
+  return ((usage.input - cachedInput) * rule.inputPerMillion + cachedInput * (rule.cachedInputPerMillion ?? rule.inputPerMillion) + usage.output * rule.outputPerMillion) / 1_000_000;
 }
 
 test("embeds official token rates for every preset API model", () => {
@@ -34,8 +35,14 @@ test("embeds official token rates for every preset API model", () => {
 
 test("estimates MiMo cost with separate input and output rates", () => {
   const rule = manifest.providers.mimo.models["mimo-v2.5"];
-  const value = estimate({ input: 24_289, output: 4_009 }, rule);
+  const value = estimate({ input: 24_289, cachedInput: 0, output: 4_009, cacheAvailable: false }, rule);
   assert.equal(value, 0.032307);
+});
+
+test("prices cache hits at the provider's cached-input rate", () => {
+  const rule = manifest.providers.mimo.models["mimo-v2.5"];
+  const value = estimate({ input: 1_000_000, cachedInput: 800_000, output: 100_000, cacheAvailable: true }, rule);
+  assert.equal(value, 0.416);
 });
 
 test("keeps the conservative cache-miss estimation policy explicit", () => {

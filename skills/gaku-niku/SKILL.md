@@ -20,7 +20,7 @@ description: "Single-model, research-first video subtitle localization for Bilib
 2. 不发送完整媒体、Cookie、令牌或密钥；只传本地路径，不打印认证信息。
 3. 长视频始终落盘处理。音频按 5–10 分钟分块，保留 2–5 秒重叠；不要将整片读入内存。
 4. 先通过研究门槛再翻译。官方名称、人物关系和关键专有名词未确认前，不开始目标语言定稿。
-5. 不猜听不清的台词或专有名词。重听、抽帧、OCR、搜索并记录证据。
+5. 不编造听不清的台词或专有名词。先判断是否影响句意，只调用真正相关的证据工具；低影响疑点优先保守表达、标记并放行。
 6. 保留原媒体和用户文件；在新任务目录输出，未获授权不得覆盖。
 7. 中文字幕默认不在每条对话末尾加句号 `。`，但保留句中句号及必要语气标点。
 8. 每个逻辑字幕最多两行，优先利用横向安全区；字幕从首词开始，到末词结束才消失。
@@ -76,7 +76,7 @@ python3 {skill_dir}/scripts/inspect_media.py PATH_TO_MEDIA
 
 让 ASR 提供词级时间戳（若支持）。多说话人材料需要说话人分离，但匿名 cluster 不等于真实身份；用自我介绍、镜头和声线证据锚定。
 
-所有疑点写入 `work/uncertainties.tsv`：`timestamp, source_guess, reason, next_check, status`。未解决的猜测不得进入译文。
+所有疑点写入 `work/uncertainties.tsv`：`timestamp, source_guess, reason, next_check, status`。可结束状态为 `resolved`、`accepted_risk`、`ignored_non_material`；只有所选复核策略仍要求继续取证的项目保留 `pending`。不得把无证据猜测伪装成已确认事实。
 
 ### 4. 当前模型逐句翻译
 
@@ -89,16 +89,19 @@ python3 {skill_dir}/scripts/inspect_media.py PATH_TO_MEDIA
 
 非显然选择写入 `work/translation-decisions.tsv`：`timestamp, source, translation, issue, evidence, confidence`。
 
-### 5. 时间点疑点取证
+### 5. 疑点分级与必要取证
 
-对低置信词、人名、屏幕文字、说话人或口型：
+遵从任务选择的 `fast`、`pragmatic`（默认）或 `strict` 复核策略。先不打开媒体，依据源文、上下文、词表和置信信息把全部候选分为：
 
-1. 提取该时间点前后音频，以正常与慢速重听。
-2. 提取 exact/before/after 帧并用宿主图像识别或 OCR 查看。
-3. 搜索画面文字、读音候选、官方人物/演出/职员表或前作台词。
-4. 更新词表和决策日志，再翻译受影响的字幕。
+- `critical`：不同读法可能改变专名、数字/日期、否定、人物关系、核心动作、因果、回调或笑点。
+- `review`：原词不完全确定，但可以在不增加事实的前提下保守翻译主要意思。
+- `minor`：口癖、重复、标点、无关背景碎语，或仅影响样式的说话人身份。
 
-最终字幕不得残留 `TODO`、`???`、`待核`、`听不清`。关键台词确实无法解决时，暂停并向用户说明证据缺口，不得编造。
+低 ASR 置信度本身不等于 `critical`。`fast`/`pragmatic` 只在预算内深查最高风险项：相邻疑点合并为音频窗口并批量二次听写；画面确实可能提供姓名卡、标牌或字幕证据时才抽帧/OCR；只有可复用专名或关键事实才搜索。
+
+`review` 使用保守译法并标为 `accepted_risk`、`flagged=true`，留给精修台；`minor` 可合并、省略或标为 `ignored_non_material`。两者都不得阻塞。`fast`/`pragmatic` 中仍未完全解决的 `critical` 使用不虚构细节的中性译法，记录 limitations 并继续；只有 `strict` 模式允许因为未解决的关键内容暂停。
+
+最终字幕文本不得残留 `TODO`、`???`、`待核`、`听不清`。在 `work/ambiguity-report.json` 和 TSV 中记录策略、数量、放行方式与证据，不得把自动放行写成“已高置信确认”。
 
 ### 6. 生成并检查字幕
 

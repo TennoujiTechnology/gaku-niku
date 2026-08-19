@@ -16,6 +16,10 @@ For source transcription:
 
 For diarization, anonymous clusters remain `speaker_01`, `speaker_02`, and so on until camera, self-introduction, name card, address, or verified voice evidence establishes identity. Record the identity evidence in `research/speakers.tsv`.
 
+### Ambiguity budget
+
+The default policy is `pragmatic`: classify every candidate, but deeply investigate no more than 24 highest-impact timestamps. `fast` limits deep review to 8; `strict` has no automatic cap. A low ASR score alone is not material risk. Batch adjacent audio checks, use OCR only when visible text can decide the issue, and search only reusable terms or facts. Non-material items use `accepted_risk` or `ignored_non_material`, remain visible in review metadata when useful, and do not block delivery.
+
 ## 2. Canonical cue data
 
 Keep one canonical UTF-8 JSON file at `work/cues.json`. SRT and ASS must be generated from it rather than edited independently:
@@ -109,6 +113,6 @@ The research gate passes only when:
 - every principal speaker visible or audible in the requested scope has a row in `speakers.tsv` or is explicitly unresolved;
 - every repeated proper noun and every proper noun in a flagged cue has a glossary row;
 - at least one official/primary source supports the identity/context, and disputed terms have a second source;
-- all low-confidence glossary rows have a next action and none enter final subtitles unresolved.
+- all low-confidence glossary rows have a recorded disposition; `accepted_risk` must use neutral wording and remain visible to the refinement workbench rather than being reported as verified.
 
 Final acceptance requires zero structural errors, zero unresolved markers, equal logical SRT/ASS cue counts, zero undocumented overlaps, duration within one second, successful stream/full-read validation, and visual QA of widest one-line/two-line cues, all used colours, bright/dark backgrounds, and special placements.

@@ -21,6 +21,7 @@ test("server-renders the subtitle studio product", async () => {
   assert.match(html, /<title>自学型熟肉机<\/title>/i);
   assert.match(html, /自学型熟肉机/);
   assert.match(html, /工作流概览/);
+  assert.match(html, /适度放行（推荐）/);
   assert.match(html, /检索并检查预习结果/);
   assert.match(html, /设置并测试翻译引擎/);
   assert.match(html, /API 模式/);
@@ -28,6 +29,7 @@ test("server-renders the subtitle studio product", async () => {
   assert.match(html, /GakuNiku/);
   assert.match(html, /用量估算/);
   assert.match(html, /合计/);
+  assert.match(html, /缓存命中/);
   assert.match(html, /费用/);
   assert.match(html, /后端(?:<!-- -->)?(?:已连接|检查中|未连接)/);
   assert.doesNotMatch(html, /aria-label="帮助"/);
@@ -106,14 +108,25 @@ test("ships the real harness and low-memory local bridge", async () => {
     "检索过程",
     "显示 Agent 执行轨迹",
     "查看与修改执行规范",
+    "疑点复核强度",
+    "适度放行（推荐）",
+    "只深查可能改变意思的内容",
     "当前任务覆盖稿",
     "确认并使用",
     "OpenCode",
     "Pi coding agent",
     "Cline CLI",
+    "打开项目",
+    "保存项目",
+    "同步精修",
   ]) {
     assert.match(component, new RegExp(phrase));
   }
+  const projectSnapshotSource = component.slice(component.indexOf("function currentProjectSnapshot"), component.indexOf("function saveStudioProject"));
+  assert.match(projectSnapshotSource, /gakuniku-project|PROJECT_FILE_FORMAT/);
+  assert.doesNotMatch(projectSnapshotSource, /\bapiKey\b|\bhfToken\b|\bsearchApiKey\b|\btranscriptionApiKey\b/);
+  assert.match(component, /parseProjectFile/);
+  assert.match(component, /\.gakuniku/);
   assert.match(component, /本地部署模型/);
   assert.match(component, /后端\{bridgeStatus/);
   assert.doesNotMatch(component, /aria-label="帮助"/);
@@ -124,7 +137,7 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.doesNotMatch(component, /听写引擎尚未通过当前视频的真实短音频测试/);
   assert.doesNotMatch(component, /请先让当前视频通过真实短音频听写测试/);
   assert.doesNotMatch(component, /本地视频还需通过短音频测试/);
-  assert.doesNotMatch(component, /requiresTranscriptionSampleTest|transcriptionTestFingerprint/);
+  assert.doesNotMatch(component, /requiresTranscriptionSampleTest|transcriptionTestFingerprint/i);
   assert.match(component, /环境位置、依赖与下载选项/);
   assert.match(component, /deliveryConstraints/);
   assert.match(component, /ENGINE_VERIFICATION_STORE/);
@@ -191,6 +204,9 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(bridge, /gpt-4o-transcribe-diarize/);
   assert.match(bridge, /diarize_model=latest/);
   assert.match(bridge, /reasoning_effort/);
+  assert.match(bridge, /ambiguityReviewPolicyPrompt/);
+  assert.match(bridge, /workflowPhaseStatus/);
+  assert.doesNotMatch(bridge, /疑点必须跳到附近时间抽帧\/OCR/);
   assert.match(bridge, /PSS_API_PROVIDER/);
   assert.match(apiHelper, /single|单次模型输入不能超过 2 MB/);
   assert.match(apiHelper, /PSS_API_KEY/);
@@ -198,6 +214,8 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(skill, /Never load a full long video\/audio into memory/);
   assert.match(skill, /Honor the job's explicit transcription configuration/);
   assert.match(skill, /maximum.*second pass/);
+  assert.match(skill, /accepted_risk/);
+  assert.match(skill, /Low ASR confidence alone does not make a cue critical/);
   assert.match(packageJson, /"bridge": "node local-agent-bridge\/server\.mjs"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

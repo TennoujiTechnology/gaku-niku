@@ -63,7 +63,7 @@ Use one row per canonical term:
 source_term	reading	canonical_target	category	evidence_url	confidence	notes
 ```
 
-Confidence is `high`, `medium`, or `low`. No low-confidence term may enter the final subtitle without a resolution entry.
+Confidence is `high`, `medium`, or `low`. A low-confidence term needs a resolution entry, but a non-material uncertainty may use neutral wording and `accepted_risk` rather than blocking the full job.
 
 ### `research/speakers.tsv`
 
@@ -106,9 +106,9 @@ Use the decision log for puns, ellipsis, honorifics, dialect, implied subjects, 
 - Do not infer a speaker solely from ASR text; use voice, camera, lip movement, seating, name cards, and dialogue address.
 - Never use an automatic target-language caption as final copy. Translate with the current model from verified source text and context.
 
-## 6. Ambiguity and visual/OCR resolution
+## 6. Risk-based ambiguity and visual/OCR resolution
 
-Trigger timestamp review when any of these occurs:
+First classify candidates from the transcript, nearby cues, glossary, and confidence data. Do not open audio, frames, OCR, and search for every low-confidence cue. Deep timestamp review is most valuable when any of these occurs:
 
 - ASR confidence is low or competing phrases sound plausible.
 - A proper noun is absent from the glossary.
@@ -116,16 +116,15 @@ Trigger timestamp review when any of these occurs:
 - A sign, slide, prop, costume, name card, chat overlay, or credit may disambiguate it.
 - The apparent speaker does not fit the camera or voice.
 
-Resolution loop:
+Route evidence by question:
 
-1. Re-listen to a 5–10 second clip at 1.0x and 0.75x.
-2. View frames at approximately `t-0.5`, `t`, and `t+0.5` seconds.
-3. Read/OCR visible Japanese exactly; distinguish similar kana/kanji and stylized fonts.
-4. Search the visible or phonetic candidates with official title/cast context.
-5. Compare with grammar, mouth timing, response, and canonical terminology.
-6. Record the evidence and confidence; update all affected cues consistently.
+1. For an auditory ambiguity, re-listen to a 5–10 second clip or run a batched second ASR pass. Keep absolute timestamps and adjacent dialogue.
+2. View nearby frames only when a name card, sign, slide, prop, credit, lip cue, or visible speaker can resolve the issue.
+3. OCR only the relevant visible crop; purely auditory ambiguity must not trigger mechanical three-frame OCR.
+4. Search official context only for a reusable proper noun or material fact. Reuse confirmed glossary entries across the whole transcript.
+5. Compare with grammar, response, canonical terminology, and scene action, then record `resolved`, `accepted_risk`, or `ignored_non_material`.
 
-Image OCR is evidence, not authority. Verify OCR text visually and by context. If the frame is unclear, inspect nearby frames or a lossless crop rather than hallucinating characters.
+Image OCR is evidence, not authority. `review` and `minor` items should normally use neutral wording, an explicit disposition, and automatic release. Only an unresolved `critical` item in `strict` mode is a phase blocker.
 
 ## 7. Chunking and consistency
 

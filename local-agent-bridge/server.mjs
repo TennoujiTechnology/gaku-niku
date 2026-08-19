@@ -10,6 +10,7 @@ import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { deflateSync } from "node:zlib";
 import { ProxyAgent } from "undici";
+import { ambiguityReviewModeFromConfig, ambiguityReviewPolicyPrompt, workflowPhaseStatus } from "./ambiguity-policy.mjs";
 import { ensureManagedUv, findExecutable, managedInstallCapabilities, managedUvPath, managedUvxPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "./runtime-manager.mjs";
 
 const bridgeDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +55,7 @@ const phaseLabels = {
   research: "正在研究作品背景与专有名词",
   source_transcript: "正在制作带时间戳的原文听写",
   translate: "正在结合上下文逐句翻译",
-  resolve_ambiguities: "正在跳转疑点画面并执行 OCR",
+  resolve_ambiguities: "正在分级复核关键疑点并自动放行低风险项",
   subtitle_qc: "正在检查两行限制、角色色与时序",
   mux: "正在封装视频与字幕轨",
   final_validation: "正在验证媒体流与成片完整性",
@@ -1327,23 +1328,36 @@ function providerHeaders(provider, key) {
 
 function normalizedTokenUsage(value) {
   const input = Number(value?.input ?? value?.prompt_tokens ?? value?.input_tokens ?? 0);
+  const explicitCacheAvailable = typeof value?.cacheAvailable === "boolean" ? value.cacheAvailable : null;
+  const cachedInputValue = explicitCacheAvailable === false ? undefined : value?.cachedInput
+    ?? value?.cached_input_tokens
+    ?? value?.input_cached_tokens
+    ?? value?.prompt_cache_hit_tokens
+    ?? value?.prompt_tokens_details?.cached_tokens
+    ?? value?.input_tokens_details?.cached_tokens
+    ?? value?.cache_read_input_tokens;
+  const cachedInput = Number(cachedInputValue ?? 0);
   const output = Number(value?.output ?? value?.completion_tokens ?? value?.output_tokens ?? 0);
   const total = Number(value?.total ?? value?.total_tokens ?? input + output);
   return {
     input: Number.isFinite(input) ? Math.max(0, input) : 0,
+    cachedInput: Number.isFinite(cachedInput) ? Math.max(0, Math.min(cachedInput, input)) : 0,
     output: Number.isFinite(output) ? Math.max(0, output) : 0,
     total: Number.isFinite(total) ? Math.max(0, total) : 0,
     available: Boolean(value) && typeof value === "object" && ["input", "output", "total", "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens"].some((key) => key in value),
+    cacheAvailable: explicitCacheAvailable ?? (cachedInputValue !== undefined && cachedInputValue !== null),
   };
 }
 
 function mergeTokenUsage(...values) {
   return values.map(normalizedTokenUsage).reduce((sum, value) => ({
     input: sum.input + value.input,
+    cachedInput: sum.cachedInput + value.cachedInput,
     output: sum.output + value.output,
     total: sum.total + value.total,
     available: sum.available || value.available,
-  }), { input: 0, output: 0, total: 0, available: false });
+    cacheAvailable: sum.cacheAvailable || value.cacheAvailable,
+  }), { input: 0, cachedInput: 0, output: 0, total: 0, available: false, cacheAvailable: false });
 }
 
 async function listApiModels(engine) {
@@ -2164,6 +2178,7 @@ function initialManifest(config) {
     languages: { source: config.sourceLanguage || "ja", target: config.targetLanguage || "zh-Hans" },
     phases: Object.fromEntries(phaseIds.map((id) => [id, { status: "pending", evidence: [] }])),
     artifacts: {},
+    review_policy: { ambiguities: ambiguityReviewModeFromConfig(config) },
     limitations: [],
   };
 }
@@ -2225,6 +2240,7 @@ function buildPrompt(config, jobDirectory, context = {}) {
     `优先研究站点: ${sites.join(", ") || "官方资料优先"}`,
     `联网检索工具: ${searchConfig(config.search || { provider: "exa" }).preset.label}。研究阶段必须实际执行多次检索、打开关键来源正文并保存直接 URL；优先官方来源，粉丝站只作语境补充。单个搜索词或网页发生 404、拒绝访问、超时或提取失败时，记录为来源警告并继续其他查询，不得结束整个任务；只有工具整体不可用或全部查询都无证据时才阻塞。工具调用会展示给用户，请让查询词和来源选择清晰可审计。`,
     `思考强度: ${config.engine?.reasoning || "medium"}。在疑点复核和专有名词判定中按此强度投入推理，但仍须以证据为准。`,
+    ambiguityReviewPolicyPrompt(ambiguityReviewModeFromConfig(config)),
     ...(context.researchPreview ? [`用户核对后的预习文档: ${context.researchPreview}。先核验其中标记为待核或低置信度的内容，再补充研究。`] : []),
     ...(context.knowledgePaths?.length ? [`用户调取的本地知识库文档: ${context.knowledgePaths.join(", ")}。知识库是线索，冲突时以当前官方来源为准。`] : []),
     ...(config.engine?.mode === "api" ? [
@@ -2235,7 +2251,7 @@ function buildPrompt(config, jobDirectory, context = {}) {
       `用户在第一步指定并验证的研究/翻译模型: Ollama/${config.engine.gpuModel || config.engine.model}。本地 Agent 只负责工具编排；检索词规划、结果筛选、证据归纳、语义判断与每批翻译必须通过 Ollama 调用该模型，不得用 Codex、Claude 或其他编排模型替代。`,
       "调用本地模型时使用磁盘分批输入，控制上下文大小，避免一次载入整份转写或视频。",
     ] : []),
-    "字幕硬约束: 每个逻辑字幕最多两行；充分利用横向安全区；对话型中文字幕默认不在每条末尾添加句号‘。’，但保留句中的句号以及必要的问号、感叹号、省略号和破折号；从该人开口的第一个词出现，到最后一个词结束时消失；可靠角色色用于外圈描边、柔光和投影；不可靠时使用确定性随机色并记录；疑点必须跳到附近时间抽帧/OCR。",
+    "字幕硬约束: 每个逻辑字幕最多两行；充分利用横向安全区；对话型中文字幕默认不在每条末尾添加句号‘。’，但保留句中的句号以及必要的问号、感叹号、省略号和破折号；从该人开口的第一个词出现，到最后一个词结束时消失；可靠角色色用于外圈描边、柔光和投影；不可靠时使用确定性随机色并记录；疑点先分级，只有画面文字确实可能解疑时才抽帧/OCR。",
     "资源约束: 不得把完整视频读入内存；音频以 5–10 分钟分块并保留 2–5 秒重叠；子进程与转写结果直接落盘。",
     `精修数据: 完成字幕后额外写出 ${path.join(jobDirectory, "work", "studio-review.json")}，JSON 结构为 {"roles":[{"id":"...","name":"...","color":"#RRGGBB"}],"cues":[{"id":1,"start":0.0,"end":1.0,"speakerId":"...","source":"...","translation":"...","confidence":0.95,"flagged":false}]}。该文件只含文本和时间码，不嵌入媒体。`,
     "开始前读取 SKILL.md 及其直接引用的三个 reference。每开始一个阶段将 manifest 对应 status 写为 in_progress，每完成则写为 complete 并记录 evidence；无法继续写 blocked 和原因。完成后保留 SRT、ASS、封装视频和验证报告。",
@@ -2366,8 +2382,8 @@ async function launchJob(config) {
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
     const latest = await readJsonFile(stateFile, state);
     const manifest = await readJsonFile(path.join(jobDirectory, "manifest.json"), {});
-    const blocked = phaseIds.find((id) => ["blocked", "error"].includes(String(manifest.phases?.[id]?.status || "")));
-    const incomplete = phaseIds.find((id) => !["complete", "completed", "skipped"].includes(String(manifest.phases?.[id]?.status || "")));
+    const blocked = phaseIds.find((id) => ["blocked", "error"].includes(workflowPhaseStatus(id, manifest.phases?.[id])));
+    const incomplete = phaseIds.find((id) => !["complete", "completed", "skipped"].includes(workflowPhaseStatus(id, manifest.phases?.[id])));
     // The manifest is the durable source of truth. An orchestrator may be
     // terminated after it has already written and validated every artifact;
     // in that case a signal/non-zero exit must not turn a completed job into
@@ -2444,7 +2460,7 @@ async function validateResumeManifest(directory, manifest, config) {
   const warnings = [];
   for (const id of phaseIds) {
     const phase = updated.phases?.[id];
-    if (!["complete", "completed"].includes(String(phase?.status || ""))) continue;
+    if (!["complete", "completed"].includes(workflowPhaseStatus(id, phase))) continue;
     const keys = phaseArtifactKeys[id] || [];
     const recorded = keys.filter((key) => updated.artifacts?.[key] != null);
     if (id === "acquire" && !recorded.length && updated.source?.acquired_media) recorded.push("__source");
@@ -2460,7 +2476,7 @@ async function validateResumeManifest(directory, manifest, config) {
     }
     break;
   }
-  const resumeFrom = phaseIds.find((id) => !["complete", "completed", "skipped"].includes(String(updated.phases?.[id]?.status || "pending")));
+  const resumeFrom = phaseIds.find((id) => !["complete", "completed", "skipped"].includes(workflowPhaseStatus(id, updated.phases?.[id])));
   if (resumeFrom) {
     const start = phaseIds.indexOf(resumeFrom);
     for (const id of phaseIds.slice(start)) {
@@ -2538,8 +2554,8 @@ async function resumeJob(id, body) {
     await Promise.all([finished(outputLog).catch(() => {}), finished(errorLog).catch(() => {})]);
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
     const latestManifest = await readJsonFile(path.join(jobDirectory, "manifest.json"), {});
-    const blocked = phaseIds.find((phaseId) => ["blocked", "error"].includes(String(latestManifest.phases?.[phaseId]?.status || "")));
-    const incomplete = phaseIds.find((phaseId) => !["complete", "completed", "skipped"].includes(String(latestManifest.phases?.[phaseId]?.status || "")));
+    const blocked = phaseIds.find((phaseId) => ["blocked", "error"].includes(workflowPhaseStatus(phaseId, latestManifest.phases?.[phaseId])));
+    const incomplete = phaseIds.find((phaseId) => !["complete", "completed", "skipped"].includes(workflowPhaseStatus(phaseId, latestManifest.phases?.[phaseId])));
     const terminal = blocked ? "blocked" : !incomplete ? "completed" : "failed";
     const blocker = blocked ? phaseBlocker(latestManifest, blocked) : null;
     await writeJsonFile(stateFile, { ...(await readJsonFile(stateFile, nextState)), status: terminal, exitCode: code, signal, ...(terminal === "completed" ? { message: "任务已完成，等待精修" } : terminal === "blocked" ? { blocker, error: blocker.detail, message: `${blocker.label}：需要处理` } : { error: `Agent 退出，代码 ${code ?? "unknown"}` }), finishedAt: new Date().toISOString() });
@@ -2556,8 +2572,8 @@ async function jobStatus(id) {
   ]);
   if (!state || !manifest) throw new Error("任务不存在");
   let effectiveState = state;
-  const blockedPhase = phaseIds.find((phaseId) => ["blocked", "error"].includes(String(manifest.phases?.[phaseId]?.status || "")));
-  const incompletePhase = phaseIds.find((phaseId) => !["complete", "completed", "skipped"].includes(String(manifest.phases?.[phaseId]?.status || "pending")));
+  const blockedPhase = phaseIds.find((phaseId) => ["blocked", "error"].includes(workflowPhaseStatus(phaseId, manifest.phases?.[phaseId])));
+  const incompletePhase = phaseIds.find((phaseId) => !["complete", "completed", "skipped"].includes(workflowPhaseStatus(phaseId, manifest.phases?.[phaseId])));
   if (state.status === "running" && !processAlive(Number(state.pid))) {
     const blocker = blockedPhase ? phaseBlocker(manifest, blockedPhase) : null;
     if (!blocker && !incompletePhase) {
@@ -2594,7 +2610,12 @@ async function jobStatus(id) {
     const phase = manifest.phases?.[id] || { status: "pending", evidence: [] };
     manifest.phases ||= {};
     manifest.phases[id] = phase;
-    const raw = phase.status ?? "pending";
+    const raw = workflowPhaseStatus(id, phase);
+    if (raw !== String(phase.status ?? "pending")) {
+      phase.status = raw;
+      phase.evidence = [...(Array.isArray(phase.evidence) ? phase.evidence : []), "按当前疑点复核策略自动放行低风险项，任务继续进入字幕质检。"];
+      manifestChanged = true;
+    }
     observedStatuses[id] = raw;
     const running = raw === "in_progress" || raw === "running";
     const terminal = ["complete", "completed", "blocked", "error", "skipped"].includes(String(raw));
@@ -2613,6 +2634,7 @@ async function jobStatus(id) {
       startedAt,
       finishedAt,
       durationMs: startedAt && finishedAt ? Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)) : null,
+      riskSummary: phase.risk_summary && typeof phase.risk_summary === "object" ? phase.risk_summary : null,
     };
     if (mapped === "done") score += 1;
     if (mapped === "running") { score += 0.35; currentPhase = id; }
@@ -2629,6 +2651,7 @@ async function jobStatus(id) {
     ...effectiveState,
     phases,
     phaseDetails,
+    reviewPolicy: manifest.review_policy || { ambiguities: "pragmatic" },
     progress,
     message: currentPhase ? phaseLabels[currentPhase] : effectiveState.message,
     manifest: { artifacts: manifest.artifacts, limitations: manifest.limitations },

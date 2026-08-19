@@ -51,6 +51,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .header-usage > span, .header-usage > div { min-width: 0; display: flex; align-items: baseline; gap: 5px; padding: 0 12px; border-left: 1px solid rgb(255 255 255 / 8%); }
 .header-usage span { color: #7f8da3; font-size: 8px; font-weight: 700; white-space: nowrap; }
 .header-usage strong { max-width: 200px; overflow: hidden; color: #dce5f2; font-size: 9px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.header-usage .billing-cache strong { color: #9ebcff; }
 .header-usage .billing-cost strong { color: #91e2bd; }
 .header-usage .header-usage-title { gap: 7px; padding-left: 0; border-left: 0; color: #9bb7f6; font-weight: 820; }
 .header-usage-title i { width: 6px; height: 6px; border-radius: 50%; background: #5b83ed; box-shadow: 0 0 8px rgb(91 131 237 / 55%); }
@@ -406,6 +407,11 @@ input::placeholder, textarea::placeholder { color: #a7afbd; }
 .harness-panel li { display: flex; align-items: center; gap: 7px; position: relative; min-width: 0; color: #505d72; font-size: 9px; white-space: nowrap; }
 .harness-panel li > span { width: 18px; height: 18px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid #dbe1e9; border-radius: 5px; color: #8490a2; font-family: var(--font-geist-mono); font-size: 7px; }
 .harness-panel li em { padding: 2px 4px; border-radius: 3px; color: #8a6421; background: #fff2cf; font-size: 7px; font-style: normal; }
+.ambiguity-review-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(132px, 190px); gap: 10px; align-items: center; margin: 0 12px 10px; padding: 10px 11px; border: 1px solid #d9e5fa; border-radius: 8px; background: #f3f7ff; }
+.ambiguity-review-control > span, .ambiguity-review-control strong, .ambiguity-review-control small { display: block; min-width: 0; }
+.ambiguity-review-control strong { color: #334865; font-size: 9px; }
+.ambiguity-review-control small { margin-top: 3px; color: #728198; font-size: 7px; line-height: 1.45; }
+.ambiguity-review-control select { width: 100%; height: 32px; border-color: #b9cae8; border-radius: 7px; color: #274d89; background: white; font-size: 8px; font-weight: 750; }
 .harness-rule { display: flex; gap: 9px; align-items: start; margin: 0 12px 12px; padding: 11px; border-radius: 8px; color: #435169; background: #f3f6fa; }
 .harness-rule > span { width: 17px; height: 17px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: white; background: #3e77df; font-size: 8px; }
 .harness-rule p { margin: 0; font-size: 8px; line-height: 1.55; }
@@ -554,6 +560,8 @@ input::placeholder, textarea::placeholder { color: #a7afbd; }
 .phase-detail-panel header button { border: 0; color: #8b95a4; background: transparent; font-size: 15px; }
 .phase-detail-panel p { margin: 8px 0; color: #657287; font-size: 9px; line-height: 1.55; }
 .phase-detail-times { display: flex; flex-wrap: wrap; gap: 7px 14px; color: #8b96a6; font-size: 7px; }
+.phase-risk-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.phase-risk-summary span { padding: 4px 7px; border-radius: 999px; color: #47638c; background: #eaf1fc; font-size: 7px; font-weight: 750; }
 .phase-evidence { margin-top: 8px; padding-top: 7px; border-top: 1px dashed #dce2ea; }
 .phase-evidence small, .run-limitations small { display: block; margin: 4px 0; color: #728095; font-size: 8px; line-height: 1.5; }
 .run-limitations { border-color: #e6cc9f; background: #fffbf3; }
@@ -974,6 +982,14 @@ body { font-size: 15px; }
 .workflow-line { width: 34px; background: #3a4960; }
 .bridge-pill { padding: 6px 9px; font-size: 9px; }
 .icon-button { width: 28px; height: 28px; }
+.project-file-actions { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid rgb(255 255 255 / 9%); border-radius: 9px; background: rgb(255 255 255 / 3%); }
+.project-file-actions button { min-height: 27px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 9px; border: 0; border-radius: 6px; color: #b8c5d7; background: transparent; font-size: 9px; font-weight: 750; white-space: nowrap; }
+.project-file-actions button:hover { color: white; background: rgb(255 255 255 / 9%); }
+.project-file-actions button:focus-visible { outline: 2px solid #7198f0; outline-offset: 1px; }
+.project-file-notice { position: fixed; z-index: 80; top: 69px; right: max(20px, calc((100vw - 1480px) / 2)); max-width: min(520px, calc(100vw - 32px)); display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px; border: 1px solid #b7decf; border-radius: 9px; color: #246d57; background: #f1fbf7; box-shadow: 0 12px 28px rgb(20 56 48 / 15%); font-size: 9px; font-weight: 700; }
+.project-file-notice span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-file-notice button { width: 23px; height: 23px; flex: 0 0 auto; border: 0; border-radius: 5px; color: #5d8c7e; background: transparent; font-size: 16px; }
+.project-file-notice button:hover { background: #dff3ec; }
 
 .billing-strip { top: 74px; min-height: 52px; grid-template-columns: .72fr repeat(3, minmax(0, 1fr)); padding: 0 max(32px, calc((100vw - 1392px) / 2)); background: #15243a; box-shadow: none; }
 .billing-strip > div { min-height: 28px; gap: 7px; padding: 0 24px; }
@@ -1106,6 +1122,10 @@ textarea { font-size: 13px; }
 .harness-panel ol { padding: 0 24px 18px; gap: 12px; }
 .harness-panel li { font-size: 12px; }
 .harness-panel li > span { width: 25px; height: 25px; font-size: 10px; }
+.ambiguity-review-control { margin: 0 24px 14px; padding: 12px 14px; }
+.ambiguity-review-control strong { font-size: 12px; }
+.ambiguity-review-control small { font-size: 9px; }
+.ambiguity-review-control select { height: 36px; font-size: 10px; }
 .harness-rule { margin: 0 24px 20px; padding: 14px; }
 .harness-rule p { font-size: 11px; }
 .harness-rule strong { font-size: 12px; }
@@ -1155,6 +1175,8 @@ textarea { font-size: 13px; }
   .workflow-line { width: 18px; }
   .header-usage .header-usage-title, .header-usage > div:last-child { display: none; }
   .header-usage > div { padding: 0 8px; }
+  .project-file-actions button { width: 29px; padding: 0; }
+  .project-file-actions button span { display: none; }
   .prepare-workbench { grid-template-columns: minmax(0, 1fr) 330px; }
   .workflow-overview { padding: 16px; }
   .workflow-overview > header { margin: -16px -16px 0; padding: 15px 16px; }
@@ -1170,6 +1192,7 @@ textarea { font-size: 13px; }
   .workflow-line { width: 14px; }
   .header-usage { display: none; }
   .bridge-pill { display: none; }
+  .project-file-notice { top: 63px; right: 12px; }
   .prepare-page { width: min(100% - 24px, 720px); }
   .prepare-intro { align-items: flex-start; flex-direction: column; }
   .prepare-workbench { grid-template-columns: 1fr; }
@@ -1188,6 +1211,7 @@ textarea { font-size: 13px; }
   .api-pricing-line { overflow-x: auto; }
   .harness-rule-editor > div { grid-template-columns: 1fr; }
   .harness-rule-editor button { min-height: 34px; }
+  .ambiguity-review-control { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {

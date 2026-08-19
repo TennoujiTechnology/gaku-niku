@@ -15,7 +15,7 @@ Produce a research-backed translation and a verified playable deliverable. Defau
 4. Research the work before translating. Do not start the target-language draft until the research gate below passes.
 5. Translate with the current model. Do not call Google Translate, DeepL, or another machine-translation API unless the user explicitly requests it.
 6. Treat official human subtitles as source evidence, not as an unquestionable translation. Treat automatic captions and ASR as drafts.
-7. Never guess a proper noun or unclear line. Re-listen, inspect frames near its timestamp, search the term, and record the decision.
+7. Never fabricate a proper noun or unclear line. Classify its semantic impact first, use only relevant evidence, and prefer a conservative translation plus an explicit review flag over an exhaustive investigation of low-impact uncertainty.
 8. Preserve the original media and existing user files. Write into a new job directory and never overwrite without explicit approval.
 9. Do not claim completion until subtitle structure, media streams, duration, and a full-read integrity scan pass.
 
@@ -86,7 +86,7 @@ Normalize to UTF-8 SRT while preserving the untouched original subtitle file. Sp
 
 Request word-level timestamps when the transcriber supports them. For multi-speaker material, label speakers with diarization anchored by known self-introductions or other verified clean clips; visually review low-confidence turns instead of treating an anonymous cluster ID as identity.
 
-For every uncertain source cue, add a row to `work/uncertainties.tsv` with `timestamp`, `source_guess`, `reason`, `next_check`, and `status`. Do not translate an unresolved guess as fact.
+For every uncertain source cue, add a row to `work/uncertainties.tsv` with `timestamp`, `source_guess`, `reason`, `next_check`, and `status`. Use `resolved`, `accepted_risk`, or `ignored_non_material` when a cue can safely proceed; reserve `pending` for an uncertainty that still needs evidence under the selected review policy. Do not present an unsupported guess as verified fact.
 
 ### 4. Translate in context-preserving chunks
 
@@ -102,16 +102,19 @@ For each cue:
 
 Record non-obvious choices in `work/translation-decisions.tsv`: `timestamp`, `source`, `translation`, `issue`, `evidence`, `confidence`.
 
-### 5. Resolve every ambiguity at its timestamp
+### 5. Triage ambiguities and resolve the ones that matter
 
-For low-confidence words, names, signs, slides, costumes, lip cues, or speaker identity:
+Honor the job's ambiguity review mode: `fast`, `pragmatic` (default), or `strict`. First classify every candidate without opening media:
 
-1. Extract audio around the cue and re-listen at normal and reduced speed.
-2. Extract frames at the cue and at nearby offsets; inspect them with the available image-viewing/OCR capability.
-3. Search the exact visual text, phonetic candidates, official cast/character pages, event pages, credits, or prior episodes.
-4. Update the glossary/decision log and retranslate affected cues.
+- `critical`: a competing reading may change a name, number/date, negation, speaker/relationship, core action, causal claim, callback, or punchline.
+- `review`: wording is uncertain but the main intent can be translated conservatively without adding facts.
+- `minor`: filler, repetition, punctuation, irrelevant background chatter, or speaker identity that affects only styling.
 
-Do not leave `[待核]`, `TODO`, `???`, “听不清”, or equivalent markers in a final subtitle. If evidence cannot resolve a material line, stop and ask the user rather than inventing it.
+Low ASR confidence alone does not make a cue critical. In `fast` and `pragmatic` modes, deep-review only the highest-impact candidates within the job's stated budget. Batch adjacent audio windows and second-pass ASR instead of loading a model per cue. Inspect frames/OCR only when visible text could actually decide the question, and search only reusable proper nouns or material facts.
+
+Translate `review` cues conservatively and mark them `accepted_risk` plus `flagged=true` for the refinement workbench. Mark harmless `minor` cues `ignored_non_material`; omit unintelligible background chatter when it does not affect comprehension. These states do not block the phase. In `fast` and `pragmatic` modes, an unresolved critical cue also proceeds with the most neutral honest wording, `accepted_risk`, a manifest limitation, and a refinement flag; do not claim that semantic precision passed. Only `strict` mode may stop for an unresolved critical cue.
+
+Do not leave `[待核]`, `TODO`, `???`, “听不清”, or equivalent markers in subtitle text. Record policy, counts, dispositions, and evidence in `work/ambiguity-report.json` and the TSV logs.
 
 ### 6. Create SRT and ASS
 

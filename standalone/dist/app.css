@@ -257,6 +257,9 @@ textarea:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.header-usage .billing-cache strong {
+  color: #9ebcff;
+}
 .header-usage .billing-cost strong {
   color: #91e2bd;
 }
@@ -2514,6 +2517,43 @@ textarea::placeholder {
   font-size: 7px;
   font-style: normal;
 }
+.ambiguity-review-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 190px);
+  gap: 10px;
+  align-items: center;
+  margin: 0 12px 10px;
+  padding: 10px 11px;
+  border: 1px solid #d9e5fa;
+  border-radius: 8px;
+  background: #f3f7ff;
+}
+.ambiguity-review-control > span,
+.ambiguity-review-control strong,
+.ambiguity-review-control small {
+  display: block;
+  min-width: 0;
+}
+.ambiguity-review-control strong {
+  color: #334865;
+  font-size: 9px;
+}
+.ambiguity-review-control small {
+  margin-top: 3px;
+  color: #728198;
+  font-size: 7px;
+  line-height: 1.45;
+}
+.ambiguity-review-control select {
+  width: 100%;
+  height: 32px;
+  border-color: #b9cae8;
+  border-radius: 7px;
+  color: #274d89;
+  background: white;
+  font-size: 8px;
+  font-weight: 750;
+}
 .harness-rule {
   display: flex;
   gap: 9px;
@@ -3383,6 +3423,20 @@ textarea::placeholder {
   gap: 7px 14px;
   color: #8b96a6;
   font-size: 7px;
+}
+.phase-risk-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.phase-risk-summary span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #47638c;
+  background: #eaf1fc;
+  font-size: 7px;
+  font-weight: 750;
 }
 .phase-evidence {
   margin-top: 8px;
@@ -5604,6 +5658,74 @@ body {
   width: 28px;
   height: 28px;
 }
+.project-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 3%);
+}
+.project-file-actions button {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: #b8c5d7;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.project-file-actions button:hover {
+  color: white;
+  background: rgb(255 255 255 / 9%);
+}
+.project-file-actions button:focus-visible {
+  outline: 2px solid #7198f0;
+  outline-offset: 1px;
+}
+.project-file-notice {
+  position: fixed;
+  z-index: 80;
+  top: 69px;
+  right: max(20px, calc((100vw - 1480px) / 2));
+  max-width: min(520px, calc(100vw - 32px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid #b7decf;
+  border-radius: 9px;
+  color: #246d57;
+  background: #f1fbf7;
+  box-shadow: 0 12px 28px rgb(20 56 48 / 15%);
+  font-size: 9px;
+  font-weight: 700;
+}
+.project-file-notice span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-file-notice button {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 5px;
+  color: #5d8c7e;
+  background: transparent;
+  font-size: 16px;
+}
+.project-file-notice button:hover {
+  background: #dff3ec;
+}
 .billing-strip {
   top: 74px;
   min-height: 52px;
@@ -6304,6 +6426,20 @@ textarea {
   height: 25px;
   font-size: 10px;
 }
+.ambiguity-review-control {
+  margin: 0 24px 14px;
+  padding: 12px 14px;
+}
+.ambiguity-review-control strong {
+  font-size: 12px;
+}
+.ambiguity-review-control small {
+  font-size: 9px;
+}
+.ambiguity-review-control select {
+  height: 36px;
+  font-size: 10px;
+}
 .harness-rule {
   margin: 0 24px 20px;
   padding: 14px;
@@ -6506,6 +6642,13 @@ textarea {
   .header-usage > div {
     padding: 0 8px;
   }
+  .project-file-actions button {
+    width: 29px;
+    padding: 0;
+  }
+  .project-file-actions button span {
+    display: none;
+  }
   .prepare-workbench {
     grid-template-columns: minmax(0, 1fr) 330px;
   }
@@ -6548,6 +6691,10 @@ textarea {
   }
   .bridge-pill {
     display: none;
+  }
+  .project-file-notice {
+    top: 63px;
+    right: 12px;
   }
   .prepare-page {
     width: min(100% - 24px, 720px);
@@ -6608,6 +6755,9 @@ textarea {
   }
   .harness-rule-editor button {
     min-height: 34px;
+  }
+  .ambiguity-review-control {
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 600px) {

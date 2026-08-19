@@ -12,7 +12,7 @@
 - 编译后的 GakuNiku 前端与本地后端
 - Node.js 22.14.0 运行时
 - 对应平台的 uv 0.11.29 工具链
-- Precision harness、固定依赖清单和 API 计费清单
+- Precision harness、可独立安装的 GakuNiku Skill、固定依赖清单和 API 计费清单
 
 Python 3.11、Faster-Whisper、WhisperX 与模型权重仍由界面在用户确认后安装到所选目录；这样可以按需选择质量，并避免首次下载前就占用数 GB。Agent CLI 继续复用用户自己安装和登录的 Codex、Claude Code、OpenCode、Pi、Cline 等工具，不会复制账号凭据。
 
