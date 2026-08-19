@@ -17,6 +17,8 @@ Do not translate target-language cues until all gate items are present:
 
 - Exact official title, installment/episode/event, release or event date, and media type.
 - Principal speakers/characters and their relationships or roles.
+- One linked speaker entity per character–performer pair, with both names retained and the current media identity marked as character, performer, or unresolved. Never count the pair as two subtitle speakers.
+- Character colours, group-member colours, or performer support colours for every principal person, with scope and provenance kept distinct.
 - Official spellings for names, units, locations, songs, organizations, attacks/skills, products, and recurring phrases.
 - A short timeline or premise sufficient to understand references in the video.
 - At least one primary/official source and a cross-check source for disputed proper nouns.
@@ -40,6 +42,7 @@ Browse using Japanese and target-language queries. Useful query patterns:
 - `"phonetic candidate" character OR cast OR episode`
 - `"official Japanese term" 中文 官方`
 - `"visible sign text" location OR franchise`
+- `"character or member name" メンバーカラー OR イメージカラー OR 応援色 公式`
 
 Open the supporting page; do not cite search snippets as evidence. Record the exact page URL and what it proves. For current cast, schedules, product names, or platform behavior, verify at execution time.
 
@@ -68,8 +71,12 @@ Confidence is `high`, `medium`, or `low`. A low-confidence term needs a resoluti
 ### `research/speakers.tsv`
 
 ```text
-speaker	role	voice_traits	canonical_name	evidence_url
+speaker_entity_id	character_name	performer_name	speaking_as	voice_traits	evidence_url	member_color	color_hex	color_scope	color_source_url	color_confidence
 ```
+
+`speaking_as` is `character`, `performer`, or `unknown`. Keep the character and performer names on the same row. Use `character` for in-story/animated dialogue and `performer` for interviews, radio, stage talk, live-event MC, or other verified本人 appearances; decide from the current media rather than the surrounding franchise page.
+
+`color_scope` is `character`, `group_member`, `performer_support`, or `fallback`. Only record a hex value when the source states it explicitly; otherwise keep the verified colour name, leave `color_hex` empty, and let subtitle styling record a deterministic fallback. Do not treat costume colour, stage lighting, or an unverified screenshot sample as an official member colour.
 
 ### `work/uncertainties.tsv`
 

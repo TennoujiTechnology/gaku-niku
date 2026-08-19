@@ -25,15 +25,17 @@ function jsonResponse(response, body, status = 200) {
 
 test("research preview uses the model selected in step one for planning and synthesis", async () => {
   const calls = [];
+  const modelPrompts = [];
   const mock = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
     if (request.url === "/v1/chat/completions") {
       const prompt = String(body.messages?.at(-1)?.content || "");
+      modelPrompts.push(prompt);
       calls.push(prompt.includes("设计 3–5 条") ? "selected-model:plan" : "selected-model:synthesis");
       const content = prompt.includes("设计 3–5 条")
-        ? JSON.stringify({ queries: ["MyGO official character", "MyGO terminology"] })
+        ? JSON.stringify({ queries: ["MyGO official character", "MyGO terminology", "MyGO メンバーカラー 応援色 公式"] })
         : "# 已核对的预习文档\n\n- 证据：https://official.example/mygo\n";
       return jsonResponse(response, {
         model: "first-step-model",
@@ -63,7 +65,9 @@ test("research preview uses the model selected in step one for planning and synt
   });
   const mockPort = await listen(mock);
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pss-selected-engine-"));
-  const bridgePort = mockPort + 1;
+  const bridgePortReservation = createServer();
+  const bridgePort = await listen(bridgePortReservation);
+  await close(bridgePortReservation);
   const projectRoot = fileURLToPath(new URL("..", import.meta.url));
   const bridge = spawn(process.execPath, [fileURLToPath(new URL("../local-agent-bridge/server.mjs", import.meta.url))], {
     cwd: projectRoot,
@@ -96,10 +100,13 @@ test("research preview uses the model selected in step one for planning and synt
     assert.equal(result.status, "completed", result.error);
     assert.match(result.generatedBy, /compatible\/first-step-model/);
     assert.match(result.document, /已核对的预习文档/);
+    assert.match(modelPrompts[0], /至少一条必须专门检索.*角色色、成员色或应援色/);
+    assert.match(modelPrompts.at(-1), /角色与成员色/);
     assert.deepEqual(result.tokenUsage, { input: 200, cachedInput: 120, output: 40, total: 240, available: true, cacheAvailable: true });
     assert.ok(result.events.some((event) => /网页打开失败.*继续/.test(event.text)));
     assert.deepEqual(calls, [
       "selected-model:plan",
+      "mcp:search_web",
       "mcp:search_web",
       "mcp:search_web",
       "mcp:fetch_web",

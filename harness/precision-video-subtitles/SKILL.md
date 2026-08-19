@@ -18,6 +18,7 @@ Produce a research-backed translation and a verified playable deliverable. Defau
 7. Never fabricate a proper noun or unclear line. Classify its semantic impact first, use only relevant evidence, and prefer a conservative translation plus an explicit review flag over an exhaustive investigation of low-impact uncertainty.
 8. Preserve the original media and existing user files. Write into a new job directory and never overwrite without explicit approval.
 9. Do not claim completion until subtitle structure, media streams, duration, and a full-read integrity scan pass.
+10. Keep large model, search, transcript, and validation payloads on disk. Never print a complete result file back into the Agent transcript; terminal output for one inspection should stay under about 4 KB and contain only the fields or bounded excerpt needed for the next decision.
 
 ## Start every job
 
@@ -58,9 +59,13 @@ Browse before translating. Create:
 - `research/brief.md`: title, installment/event, premise, timeline, participants/characters, relationships, setting, running jokes, and relevant prior events.
 - `research/sources.md`: direct links, access date, and what each source establishes.
 - `research/glossary.tsv`: `source_term`, `reading`, `canonical_target`, `category`, `evidence_url`, `confidence`, `notes`.
-- `research/speakers.tsv`: `speaker`, `role`, `voice_traits`, `canonical_name`, `evidence_url`.
+- `research/speakers.tsv`: `speaker_entity_id`, `character_name`, `performer_name`, `speaking_as`, `voice_traits`, `evidence_url`, `member_color`, `color_hex`, `color_scope`, `color_source_url`, `color_confidence`.
 
-Research gate passes only when the work, episode/event, principal speakers, and recurring proper nouns are identified, and every glossary entry has evidence or is explicitly marked unresolved. Prefer primary/official sources; use reputable databases or wikis only to fill gaps and cross-check.
+Research gate passes only when the work, episode/event, principal speakers, recurring proper nouns, and the colour-research status for every principal speaker are recorded, and every glossary entry has evidence or is explicitly marked unresolved. Search role/member/support colours as a dedicated research item. Distinguish character colour, group-member colour, and performer support colour; record an explicit value with provenance or mark it unresolved for deterministic fallback. Prefer primary/official sources; use reputable databases or wikis only to fill gaps and cross-check.
+
+Identity rule: a character and the actor/voice actor who performs that character are one linked speaker entity, not two independent people in the subtitle role list. Store both names on the same row and set `speaking_as` to `character`, `performer`, or `unknown` from the current media evidence. Character dialogue normally labels the character; interviews, radio, stage talk, and live-event MC normally label the performer. Never split the pair merely because both names appear in research.
+
+When the job contains a user-approved research preview, treat it as the reusable research baseline instead of repeating the original broad search. Split it into the four required artifacts first, then perform only delta verification for entries explicitly marked uncertain, facts that conflict with the current clip, or new material facts that would change the translation. The default delta budget is at most three targeted queries and four opened source pages; record any remaining uncertainty instead of restarting general research.
 
 ### 3. Build the source transcript
 
@@ -84,7 +89,7 @@ For online ASR, extract audio and upload only bounded 5–10 minute chunks. Do n
 
 Normalize to UTF-8 SRT while preserving the untouched original subtitle file. Split long media into 5–10 minute audio chunks; include overlap and reconcile duplicates by timestamp. Keep source transcription separate from translation.
 
-Request word-level timestamps when the transcriber supports them. For multi-speaker material, label speakers with diarization anchored by known self-introductions or other verified clean clips; visually review low-confidence turns instead of treating an anonymous cluster ID as identity.
+Request word-level timestamps when the transcriber supports them. For multi-speaker material, label speakers with diarization anchored by known self-introductions or other verified clean clips; visually review low-confidence turns instead of treating an anonymous cluster ID as identity. Resolve each cluster to a single linked speaker entity and choose its current `speaking_as`; do not create separate role-list entries for the character name and the corresponding performer name.
 
 For every uncertain source cue, add a row to `work/uncertainties.tsv` with `timestamp`, `source_guess`, `reason`, `next_check`, and `status`. Use `resolved`, `accepted_risk`, or `ignored_non_material` when a cue can safely proceed; reserve `pending` for an uncertainty that still needs evidence under the selected review policy. Do not present an unsupported guess as verified fact.
 
@@ -124,7 +129,7 @@ Read [references/subtitle-qc-and-mux.md](references/subtitle-qc-and-mux.md) comp
 - For conversational Chinese subtitles, omit a terminal full stop `。` at the end of a cue by default. Keep full stops inside a multi-sentence cue and retain meaningful question marks, exclamation marks, ellipses, dashes, and other intentional punctuation.
 - Enforce a hard maximum of two visible lines per logical cue. Measure rendered width at the target resolution/font, use the safe horizontal area before wrapping, and prevent orphaned one- or two-character second lines. A small documented horizontal scale (normally no lower than 92%) is preferable to a nearly empty second line.
 - Time each logical cue from the first spoken word to the last spoken word. Do not use a fixed display duration. When a long utterance needs multiple panels, switch panels at real word boundaries while keeping the overall first-word/last-word envelope exact.
-- Research canonical speaker/member colours. Use a deterministic, recorded fallback palette only when no reliable colour can be established. Keep the text fill high-contrast; apply the member colour to a reusable outline plus subtle glow/shadow layer.
+- Research canonical speaker/member colours. For every role, record the chosen hex value and provenance as `official`, `evidence`, `user`, or `fallback`, including a direct source URL or the named fallback rule. Use a deterministic, recorded fallback palette only when no reliable colour can be established. A successfully applied fallback is informational style provenance, not a delivery limitation. Keep the text fill high-contrast; apply the member colour to a reusable outline plus subtle glow/shadow layer.
 - Use ASS styles for position or speaker differentiation, not hard-coded drawing hacks. Mark duplicate glow/shadow Dialogue rows with an `Effect` beginning `decorative` so validation counts logical cues rather than paint layers.
 - Run deterministic checks:
 
@@ -160,7 +165,7 @@ Then verify:
 - No unresolved markers or untranslated dialogue remain.
 - Full-read scan reports no corruption.
 
-Report the final media path, external subtitle paths, actual resolution/codecs, duration, size, validation result, and any honest limitations. Mention persistent login storage and logout steps if authentication was used.
+Report the final media path, external subtitle paths, actual resolution/codecs, duration, size, and validation result. Keep unresolved material risks in `manifest.limitations`; put successful fallbacks and resolved cues retained for optional refinement in `manifest.notices`. Do not present informational provenance as a current limitation. Mention persistent login storage and logout steps if authentication was used.
 
 ## Recovery rules
 

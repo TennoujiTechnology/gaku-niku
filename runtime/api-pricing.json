@@ -6,6 +6,7 @@
     "openai": {
       "docsUrl": "https://developers.openai.com/api/docs/models/compare",
       "models": {
+        "gpt-5.6": { "currency": "USD", "inputPerMillion": 5, "cachedInputPerMillion": 0.5, "outputPerMillion": 30, "note": "Stable flagship alias; routes to the current GPT-5.6 Sol model." },
         "gpt-5.6-sol": { "currency": "USD", "inputPerMillion": 5, "cachedInputPerMillion": 0.5, "outputPerMillion": 30, "note": "Standard processing. Requests above the long-context threshold may receive an official pricing multiplier." },
         "gpt-5.6-terra": { "currency": "USD", "inputPerMillion": 2.5, "cachedInputPerMillion": 0.25, "outputPerMillion": 15, "note": "Standard processing. Requests above the long-context threshold may receive an official pricing multiplier." },
         "gpt-5.6-luna": { "currency": "USD", "inputPerMillion": 1, "cachedInputPerMillion": 0.1, "outputPerMillion": 6, "note": "Standard processing. Requests above the long-context threshold may receive an official pricing multiplier." }
@@ -14,6 +15,8 @@
     "xai": {
       "docsUrl": "https://docs.x.ai/developers/pricing",
       "models": {
+        "grok-4.6": { "currency": "USD", "inputPerMillion": 2, "cachedInputPerMillion": 0.3, "outputPerMillion": 6, "note": "Current stable multimodal flagship alias." },
+        "grok-4.6-latest": { "currency": "USD", "inputPerMillion": 2, "cachedInputPerMillion": 0.3, "outputPerMillion": 6, "note": "Latest Grok 4.6 alias; behavior can update with new releases." },
         "grok-4.5": { "currency": "USD", "inputPerMillion": 2, "cachedInputPerMillion": 0.3, "outputPerMillion": 6, "note": "Short-context rate. Requests at or above 200K input tokens use the official long-context rate." },
         "grok-4.3": { "currency": "USD", "inputPerMillion": 1.25, "cachedInputPerMillion": 0.2, "outputPerMillion": 2.5, "note": "Short-context rate. Requests at or above 200K input tokens use the official long-context rate." }
       }

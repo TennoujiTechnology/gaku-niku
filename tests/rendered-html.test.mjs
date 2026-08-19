@@ -58,6 +58,14 @@ test("ships the real harness and low-memory local bridge", async () => {
   }
   for (const phrase of [
     "检索并生成预习结果文档",
+    "人物／成员色与应援色",
+    "固定检索项",
+    "默认直接采用，无需额外确认",
+    "人物身份成对、只建一个元素",
+    "当前任务的外部模型处理",
+    "识别出的人物实体",
+    "角色发言",
+    "声优本人",
     "设置并测试翻译引擎",
     "测试文字与图片能力",
     "关闭代理并重新测试",
@@ -90,7 +98,9 @@ test("ships the real harness and low-memory local bridge", async () => {
     "思考强度",
     "本地知识库",
     "文字与图片能力测试",
-    "从账户同步模型",
+    "本版推荐",
+    "检查更新",
+    "账户其他模型",
     "保存到本机浏览器",
     "官方文档核对",
     "给第一步模型配置联网检索",
@@ -112,13 +122,17 @@ test("ships the real harness and low-memory local bridge", async () => {
     "适度放行（推荐）",
     "只深查可能改变意思的内容",
     "当前任务覆盖稿",
-    "确认并使用",
+    "保存并关闭",
     "OpenCode",
     "Pi coding agent",
     "Cline CLI",
     "打开项目",
     "保存项目",
     "同步精修",
+    "从断点继续",
+    "允许当前任务使用外部模型",
+    "允许上述服务仅为本次字幕任务处理这些数据",
+    "成片说明",
   ]) {
     assert.match(component, new RegExp(phrase));
   }
@@ -136,8 +150,11 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.doesNotMatch(component, /模型测试可以稍后完成/);
   assert.doesNotMatch(component, /听写引擎尚未通过当前视频的真实短音频测试/);
   assert.doesNotMatch(component, /请先让当前视频通过真实短音频听写测试/);
+  assert.doesNotMatch(component, /自动读取最新模型目录/);
+  assert.doesNotMatch(component, /syncProviderModels\(\{ automatic/);
   assert.doesNotMatch(component, /本地视频还需通过短音频测试/);
   assert.doesNotMatch(component, /requiresTranscriptionSampleTest|transcriptionTestFingerprint/i);
+  assert.doesNotMatch(component, /尚未确认 Precision harness|允许本任务使用外部模型？|externalConsentOpen/);
   assert.match(component, /环境位置、依赖与下载选项/);
   assert.match(component, /deliveryConstraints/);
   assert.match(component, /ENGINE_VERIFICATION_STORE/);
@@ -146,7 +163,16 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(component, /MAX_REVIEW_HISTORY = 100/);
   assert.match(component, /window\.addEventListener\("keydown", handleReviewHistoryShortcut\)/);
   assert.match(component, /rememberReviewState\(`cue:\$\{drag\.cueId\}:timeline-drag`\)/);
+  assert.match(component, /const visibleCue = cues\.find\(\(cue\) => currentTime >= cue\.start && currentTime < cue\.end\);/);
+  assert.doesNotMatch(component, /const currentCue = cues\.find[\s\S]{0,160}\?\? selectedCue/);
   assert.match(bridge, /用户确认的本次成片约束/);
+  assert.match(bridge, /必须把主要人物的角色色、成员色或应援色作为独立检索项目/);
+  assert.match(bridge, /角色与成员色/);
+  assert.match(bridge, /角色名与对应声优必须写入同一 speaker_entity_id/);
+  assert.match(bridge, /一个角色及其对应声优\/出演者只能生成一个人物实体/);
+  assert.match(bridge, /function normalizeStudioReview/);
+  assert.match(bridge, /manifest\.limitations 只记录尚未解决/);
+  assert.match(skill, /informational style provenance, not a delivery limitation/);
   assert.match(bridge, /127\.0\.0\.1/);
   assert.doesNotMatch(component, /fieldset className="step-fields" disabled=\{!engineVerified\}/);
   assert.doesNotMatch(component, /模型测试通过后解锁|待解锁/);
@@ -161,9 +187,15 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(bridge, /researchEvents/);
   assert.match(bridge, /\/api\/engine\/test/);
   assert.match(bridge, /\/api\/engine\/models/);
-  for (const model of ["gpt-5.6-sol", "grok-4.5", "deepseek-v4-pro", "kimi-k3", "mimo-v2.5-pro", "MiniMax-M2.7", "glm-5.2"]) {
+  for (const model of ["gpt-5.6", "grok-4.6", "kimi-k3", "mimo-v2.5", "glm-5v-turbo"]) {
     assert.match(bridge, new RegExp(model.replaceAll(".", "\\.")));
   }
+  assert.match(bridge, /不能通过本项目必需的图片能力测试/);
+  assert.match(component, /grok-4\.6/);
+  assert.match(component, /MODEL_CATALOG_STORE/);
+  assert.match(component, /readModelCatalog/);
+  assert.match(bridge, /language-models/);
+  assert.match(bridge, /fetchedAt/);
   assert.match(bridge, /\/api\/knowledge/);
   assert.match(bridge, /name === "opencode"/);
   assert.match(bridge, /name === "pi"/);
@@ -175,6 +207,12 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(bridge, /verge_mixed_port/);
   assert.match(bridge, /proxySuggestion/);
   assert.match(bridge, /已跳过并继续/);
+  assert.match(bridge, /Agent 编排通道响应较慢/);
+  assert.match(bridge, /不得从零重复通用检索/);
+  assert.match(bridge, /每次终端回显控制在 4 KB 内/);
+  assert.match(bridge, /"--disable", "plugins"/);
+  assert.match(bridge, /"--disable", "apps"/);
+  assert.match(bridge, /"--disable", "tool_suggest"/);
   assert.match(bridge, /await startResearchRun\(body\.engine/);
   assert.doesNotMatch(bridge, /const researchEngine = body\.engine\?\.mode === "cli"/);
   assert.match(bridge, /researchKnowledgeContext/);
@@ -198,6 +236,10 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(bridge, /\/api\/transcription\/install/);
   assert.match(bridge, /\/api\/transcription\/test/);
   assert.match(bridge, /\/resume/);
+  assert.match(bridge, /\/cancel/);
+  assert.match(bridge, /terminateJob/);
+  assert.match(bridge, /stopJobProcessTree/);
+  assert.match(bridge, /status: "cancelled"/);
   assert.match(bridge, /validateResumeManifest/);
   assert.match(bridge, /jobDiagnostics/);
   assert.match(bridge, /jobResources/);
@@ -208,6 +250,9 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(bridge, /workflowPhaseStatus/);
   assert.doesNotMatch(bridge, /疑点必须跳到附近时间抽帧\/OCR/);
   assert.match(bridge, /PSS_API_PROVIDER/);
+  assert.match(bridge, /verifiedExternalProcessingConsent/);
+  assert.match(bridge, /外部处理知情授权/);
+  assert.match(bridge, /不得再次因为发送已授权的听写文本/);
   assert.match(apiHelper, /single|单次模型输入不能超过 2 MB/);
   assert.match(apiHelper, /PSS_API_KEY/);
   assert.match(apiHelper, /tokenUsage/);
@@ -216,6 +261,23 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(skill, /maximum.*second pass/);
   assert.match(skill, /accepted_risk/);
   assert.match(skill, /Low ASR confidence alone does not make a cue critical/);
+  assert.match(skill, /Never print a complete result file back into the Agent transcript/);
+  assert.match(skill, /user-approved research preview/);
+  assert.match(skill, /member_color.*color_hex.*color_scope.*color_source_url.*color_confidence/);
+  assert.match(skill, /one linked speaker entity, not two independent people/);
+  assert.match(component, /终止任务/);
+  assert.match(component, /确认终止当前任务/);
+  assert.match(component, /\/cancel/);
+  assert.match(component, /className="topbar-terminate-button"/);
+  assert.match(component, /terminateConfirmOpen && jobId/);
+  assert.doesNotMatch(component, /jobRunStatus === "running" && !terminateConfirmOpen/);
+  assert.match(component, /本版推荐/);
+  assert.match(component, /检查更新/);
+  assert.match(component, /推荐多模态模型/);
+  assert.match(component, /model-catalogs\.v2/);
+  assert.doesNotMatch(component, /syncProviderModels\(\{ automatic:/);
+  assert.match(component, /glm-5v-turbo/);
+  assert.match(component, /mimo-v2\.5 是原生全模态模型/);
   assert.match(packageJson, /"bridge": "node local-agent-bridge\/server\.mjs"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

@@ -115,7 +115,7 @@ Lead with the final result, using clickable absolute local paths. Report:
 - Actual resolution, video/audio codecs, frame rate, duration, and size
 - Subtitle cue count and default track
 - Validation outcome
-- Honest limitations or unresolved non-material details
+- Honest unresolved material limitations, separated from informational fallback provenance and optional refinement notes
 - Authentication storage/logout note if a downloader login was used
 
 Do not make the user read downloader logs to understand whether the task succeeded.

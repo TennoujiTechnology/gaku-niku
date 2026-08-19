@@ -11,8 +11,8 @@ function estimate(usage, rule) {
 
 test("embeds official token rates for every preset API model", () => {
   const expected = {
-    openai: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-    xai: ["grok-4.5", "grok-4.3"],
+    openai: ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    xai: ["grok-4.6", "grok-4.6-latest", "grok-4.5", "grok-4.3"],
     deepseek: ["deepseek-v4-pro", "deepseek-v4-flash"],
     kimi: ["kimi-k3", "kimi-k2.6"],
     kimi_intl: ["kimi-k3", "kimi-k2.6"],

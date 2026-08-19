@@ -79,6 +79,7 @@ const transcriptionInstallLockRoots = new Map();
 const proxyDispatchers = new Map();
 const jobResourceCache = new Map();
 const jobPhaseStatusCache = new Map();
+const activeJobProcesses = new Map();
 
 await Promise.all([jobsRoot, knowledgeRoot, previewRoot].map((directory) => mkdir(directory, { recursive: true })));
 
@@ -192,15 +193,15 @@ const pricingFor = (provider) => apiPricingManifest.providers?.[provider]?.model
 const pricingDocsFor = (provider) => apiPricingManifest.providers?.[provider]?.docsUrl || "";
 
 const apiPresets = {
-  openai: { label: "GPT / OpenAI API", baseUrl: "https://api.openai.com/v1", models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"], docsUrl: "https://developers.openai.com/api/docs/models/all", checkedAt: "2026-08-13", note: "Sol 旗舰；Terra 均衡；Luna 高性价比", pricing: pricingFor("openai"), pricingDocsUrl: pricingDocsFor("openai") },
-  xai: { label: "Grok / xAI", baseUrl: "https://api.x.ai/v1", models: ["grok-4.5", "grok-4.3"], docsUrl: "https://docs.x.ai/developers/models/grok-4.5", checkedAt: "2026-08-13", note: "4.5 最新旗舰；4.3 通用低成本", pricing: pricingFor("xai"), pricingDocsUrl: pricingDocsFor("xai") },
-  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-pro", "deepseek-v4-flash"], docsUrl: "https://api-docs.deepseek.com/news/news260424/", checkedAt: "2026-08-13", note: "旧 chat / reasoner 别名已下线", pricing: pricingFor("deepseek"), pricingDocsUrl: pricingDocsFor("deepseek") },
-  kimi: { label: "Kimi / Moonshot（中国站）", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-k3", "kimi-k2.6"], docsUrl: "https://www.kimi.com/zh-cn/help/kimi-api/api-model-selection", checkedAt: "2026-08-13", note: "K3 旗舰；K2.6 支持思考开关", pricing: pricingFor("kimi"), pricingDocsUrl: pricingDocsFor("kimi") },
-  kimi_intl: { label: "Kimi / Moonshot（国际站）", baseUrl: "https://api.moonshot.ai/v1", models: ["kimi-k3", "kimi-k2.6"], docsUrl: "https://www.kimi.com/help/kimi-api/api-model-selection", checkedAt: "2026-08-13", note: "国际站 Key 与中国站 Key 不互通", pricing: pricingFor("kimi_intl"), pricingDocsUrl: pricingDocsFor("kimi_intl") },
-  mimo: { label: "小米 MiMo", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro", "mimo-v2.5"], docsUrl: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/model", checkedAt: "2026-08-13", note: "Pro 复杂推理；V2.5 全模态", pricing: pricingFor("mimo"), pricingDocsUrl: pricingDocsFor("mimo") },
-  minimax: { label: "MiniMax", baseUrl: "https://api.minimaxi.com/v1", models: ["MiniMax-M2.7", "MiniMax-M2.7-highspeed"], docsUrl: "https://platform.minimaxi.com/docs/guides/text-generation", checkedAt: "2026-08-13", note: "M2.7 标准版与高速版", pricing: pricingFor("minimax"), pricingDocsUrl: pricingDocsFor("minimax") },
-  glm: { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-5.2"], docsUrl: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2", checkedAt: "2026-08-13", note: "当前旗舰，1M 上下文", pricing: pricingFor("glm"), pricingDocsUrl: pricingDocsFor("glm") },
-  compatible: { label: "自定义兼容接口", baseUrl: "", models: [] },
+  openai: { label: "GPT / OpenAI API", baseUrl: "https://api.openai.com/v1", models: ["gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"], multimodal: "native", docsUrl: "https://developers.openai.com/api/docs/models/compare", checkedAt: "2026-08-16", note: "仅推荐官方当前支持图像输入的 5.6 系列；默认使用稳定旗舰别名 gpt-5.6", pricing: pricingFor("openai"), pricingDocsUrl: pricingDocsFor("openai") },
+  xai: { label: "Grok / xAI", baseUrl: "https://api.x.ai/v1", models: ["grok-4.6", "grok-4.6-latest"], multimodal: "native", docsUrl: "https://docs.x.ai/developers/models", checkedAt: "2026-08-16", note: "官方推荐 Grok 4.6 稳定别名；账户快照与内部版本不会抢占默认选择", pricing: pricingFor("xai"), pricingDocsUrl: pricingDocsFor("xai") },
+  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", models: [], multimodal: "unavailable", docsUrl: "https://api-docs.deepseek.com/updates", checkedAt: "2026-08-16", note: "DeepSeek V4 官方 API 当前是文本模型，不能通过本项目必需的图片能力测试", pricing: pricingFor("deepseek"), pricingDocsUrl: pricingDocsFor("deepseek") },
+  kimi: { label: "Kimi / Moonshot（中国站）", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"], multimodal: "native", docsUrl: "https://platform.kimi.com/docs/guide/use-kimi-vision-model", checkedAt: "2026-08-16", note: "K3 为通用多模态旗舰；K2.7 Code 与 K2.6 同样支持图像/视频输入", pricing: pricingFor("kimi"), pricingDocsUrl: pricingDocsFor("kimi") },
+  kimi_intl: { label: "Kimi / Moonshot（国际站）", baseUrl: "https://api.moonshot.ai/v1", models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"], multimodal: "native", docsUrl: "https://www.kimi.com/help/kimi-api/api-overview", checkedAt: "2026-08-16", note: "K3 为通用多模态旗舰；国际站 Key 与中国站 Key 不互通", pricing: pricingFor("kimi_intl"), pricingDocsUrl: pricingDocsFor("kimi_intl") },
+  mimo: { label: "小米 MiMo", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5"], multimodal: "native", docsUrl: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/model", checkedAt: "2026-08-16", note: "mimo-v2.5 是原生全模态模型；Pro 是文本/Agent 旗舰，不用于图像测试", pricing: pricingFor("mimo"), pricingDocsUrl: pricingDocsFor("mimo") },
+  minimax: { label: "MiniMax", baseUrl: "https://api.minimaxi.com/v1", models: [], multimodal: "unavailable", docsUrl: "https://platform.minimaxi.com/docs/api-reference/api-overview", checkedAt: "2026-08-16", note: "M2.7 官方定位为文本模型；图片理解需额外 MCP，不能作为直连多模态翻译引擎", pricing: pricingFor("minimax"), pricingDocsUrl: pricingDocsFor("minimax") },
+  glm: { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-5v-turbo", "glm-4.6v", "glm-4.6v-flashx", "glm-4.6v-flash"], multimodal: "native", docsUrl: "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5v-turbo", checkedAt: "2026-08-16", note: "优先 GLM-5V-Turbo 多模态模型；不再把纯文本旗舰 GLM-5.2 作为图像测试默认项", pricing: pricingFor("glm"), pricingDocsUrl: pricingDocsFor("glm") },
+  compatible: { label: "自定义兼容接口", baseUrl: "", models: [], multimodal: "unknown", note: "接口不提供统一能力元数据，必须通过文字与图片实测后才可使用" },
 };
 
 const searchPresets = {
@@ -1360,13 +1361,51 @@ function mergeTokenUsage(...values) {
   }), { input: 0, cachedInput: 0, output: 0, total: 0, available: false, cacheAvailable: false });
 }
 
+const multimodalModelPatterns = {
+  openai: [/^gpt-5\.(?:4|5|6)(?:$|-)/i, /^gpt-4o(?:$|-)/i],
+  xai: [/^grok-4\.6(?:$|-latest$)/i],
+  deepseek: [],
+  kimi: [/^kimi-(?:k3|k2\.(?:5|6|7))(?:$|-)/i],
+  kimi_intl: [/^kimi-(?:k3|k2\.(?:5|6|7))(?:$|-)/i],
+  mimo: [/^mimo-v2\.5$/i],
+  minimax: [],
+  glm: [/^glm-(?:5v|4\.(?:5|6)v)(?:$|-)/i],
+};
+
+function catalogItemIds(item) {
+  if (typeof item === "string") return [item];
+  return [item?.id || item?.name, ...(Array.isArray(item?.aliases) ? item.aliases : [])].filter((value) => typeof value === "string");
+}
+
+function catalogInputModalities(item) {
+  if (!item || typeof item !== "object") return [];
+  const values = item.input_modalities || item.inputModalities || item.capabilities?.input_modalities || item.capabilities?.inputModalities || item.modalities?.input;
+  return Array.isArray(values) ? values.map((value) => String(value).toLowerCase()) : [];
+}
+
+function isMultimodalCatalogModel(provider, id, metadata) {
+  if (provider === "compatible") return true;
+  const advertised = catalogInputModalities(metadata);
+  if (advertised.length) return advertised.some((value) => value === "image" || value === "video" || value === "vision");
+  return (multimodalModelPatterns[provider] || []).some((pattern) => pattern.test(id));
+}
+
+function stableModelAlias(id) {
+  return !/(?:^|[-_.])(preview|beta|experimental|non-reasoning|reasoning)(?:$|[-_.])/i.test(id)
+    && !/(?:19|20)\d{2}[-_.]?\d{2}[-_.]?\d{2}/.test(id)
+    && !/(?:^|[-_.])\d{8}(?:$|[-_.])/.test(id);
+}
+
 async function listApiModels(engine) {
   const key = String(engine.apiKey || "").trim();
   if (!key) throw new Error("请先填写 API Key");
   const preset = presetFor(engine);
   if (!preset.baseUrl) throw new Error("请先填写 Base URL");
   let modelsUrl;
-  try { modelsUrl = new URL(`${preset.baseUrl}/models`); } catch { throw new Error("Base URL 格式不正确"); }
+  // xAI exposes a language-only catalog with modality and live pricing data.
+  // Other OpenAI-compatible providers conventionally expose /models.
+  const catalogPath = engine.provider === "xai" ? "language-models" : "models";
+  try { modelsUrl = new URL(`${preset.baseUrl.replace(/\/$/, "")}/${catalogPath}`); } catch { throw new Error("Base URL 格式不正确"); }
   if (!/^https?:$/.test(modelsUrl.protocol)) throw new Error("Base URL 只支持 HTTP 或 HTTPS");
   const response = await fetch(modelsUrl, {
     headers: providerHeaders(engine.provider, key),
@@ -1378,9 +1417,55 @@ async function listApiModels(engine) {
   try { data = JSON.parse(raw); } catch { data = { raw: raw.slice(0, 1000) }; }
   if (!response.ok) throw new Error(data?.error?.message || data?.message || `模型列表接口返回 HTTP ${response.status}`);
   const candidates = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
-  const models = [...new Set(candidates.map((item) => typeof item === "string" ? item : item?.id || item?.name).filter((item) => typeof item === "string" && item.length <= 160))].slice(0, 500);
+  const allModels = [...new Set(candidates.flatMap(catalogItemIds).filter((item) => typeof item === "string" && item.length <= 160))].slice(0, 500);
+  const nonTranslationModel = /(^|[-_.])(embedding|embed|rerank|moderation|asr|tts|speech|voice|whisper|transcribe|image|video)([-_.]|$)/i;
+  const models = engine.provider === "compatible" ? allModels : allModels.filter((id) => !nonTranslationModel.test(id));
   if (!models.length) throw new Error("接口已连接，但没有返回可识别的模型 ID");
-  return { models, source: modelsUrl.origin + modelsUrl.pathname };
+  const metadataById = new Map();
+  for (const item of candidates) for (const id of catalogItemIds(item)) metadataById.set(id, item);
+  const multimodalModels = models.filter((id) => isMultimodalCatalogModel(engine.provider, id, metadataById.get(id)));
+  const preferred = apiPresets[engine.provider]?.models || [];
+  const preferredAvailable = preferred.filter((id) => multimodalModels.includes(id));
+  const recommendedModels = [...new Set([
+    ...preferredAvailable,
+    ...multimodalModels.filter((id) => stableModelAlias(id)),
+  ])].slice(0, 8);
+  const warning = recommendedModels.length
+    ? ""
+    : apiPresets[engine.provider]?.multimodal === "unavailable"
+      ? apiPresets[engine.provider].note
+      : engine.provider === "compatible"
+        ? "自定义接口没有统一的能力元数据；下列模型只是账户候选，仍须通过图片实测"
+        : "账户模型目录中没有发现可确认支持图像输入的通用模型；请检查账户权限或更换厂商";
+  const pricing = {};
+  if (engine.provider === "xai") {
+    for (const item of candidates) {
+      if (!item || typeof item !== "object") continue;
+      const ids = [item.id || item.name, ...(Array.isArray(item.aliases) ? item.aliases : [])].filter(Boolean);
+      const input = Number(item.prompt_text_token_price);
+      const cached = Number(item.cached_prompt_text_token_price);
+      const output = Number(item.completion_text_token_price);
+      if (![input, output].every(Number.isFinite)) continue;
+      for (const id of ids) pricing[id] = {
+        currency: "USD",
+        inputPerMillion: input / 10_000,
+        ...(Number.isFinite(cached) ? { cachedInputPerMillion: cached / 10_000 } : {}),
+        outputPerMillion: output / 10_000,
+        note: "由 xAI 当前账户模型目录实时返回",
+      };
+    }
+  }
+  return {
+    models: recommendedModels,
+    recommendedModels,
+    allModels: models,
+    multimodalCount: multimodalModels.length,
+    pricing,
+    warning,
+    filteredOut: allModels.length - models.length,
+    source: modelsUrl.origin + modelsUrl.pathname,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 function extractText(value) {
@@ -1458,7 +1543,13 @@ async function apiChat(engine, messages, options = {}) {
 function researchTemplate(body) {
   const keywords = (body.keywords || []).join("、") || "待填写作品关键词";
   const sites = [...(body.sites || []), ...(body.customSites || [])].join("、") || "官方站点";
-  return `# ${keywords} · 翻译前预习\n\n> 状态：待用户核对。没有来源支持的内容不得直接进入最终译稿。\n\n## 检索目标\n\n- 确认作品、活动/集数、时间与媒体类型\n- 确认主要角色、出演者、关系与称呼\n- 确认专有名词、歌曲、组织与固定译名\n- 记录容易误听、误译的语境和梗\n\n## 关键词\n\n${(body.keywords || []).map((item) => `- ${item}`).join("\n") || "- 待填写"}\n\n## 优先来源\n\n- ${sites}\n\n## 人物与关系\n\n| 原名 | 官方中文名 | 身份/关系 | 证据链接 | 置信度 |\n| --- | --- | --- | --- | --- |\n| 待检索 | 待核对 | 待填写 |  | 低 |\n\n## 术语表\n\n| 原文 | 读音 | 推荐译法 | 类型 | 证据链接 |\n| --- | --- | --- | --- | --- |\n| 待检索 |  | 待核对 | 专有名词 |  |\n\n## 时间线与语境\n\n- 待补充\n\n## 翻译决定\n\n- 对话型字幕默认去掉句末句号\n- 未核实的专有名词必须回到对应时间抽帧/OCR/重听\n`;
+  return `# ${keywords} · 翻译前预习\n\n> 状态：待用户核对。没有来源支持的内容不得直接进入最终译稿。\n\n## 检索目标\n\n- 确认作品、活动/集数、时间与媒体类型\n- 确认主要角色、出演者、关系与称呼\n- 搜索主要人物的角色色、成员色或应援色，并记录来源与可信度\n- 确认专有名词、歌曲、组织与固定译名\n- 记录容易误听、误译的语境和梗\n\n## 关键词\n\n${(body.keywords || []).map((item) => `- ${item}`).join("\n") || "- 待填写"}\n\n## 优先来源\n\n- ${sites}\n\n## 人物与关系\n\n| 原名 | 官方中文名 | 身份/关系 | 证据链接 | 置信度 |\n| --- | --- | --- | --- | --- |\n| 待检索 | 待核对 | 待填写 |  | 低 |\n\n## 角色与成员色\n\n| 人物/成员 | 适用身份 | 色名 | HEX | 来源类型 | 证据链接 | 置信度 | 备注 |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 待检索 | 角色/成员/出演者 | 待核实 |  | 待核实 |  | 低 | 找不到可靠资料时后续使用确定性回退色 |\n\n## 术语表\n\n| 原文 | 读音 | 推荐译法 | 类型 | 证据链接 |\n| --- | --- | --- | --- | --- |\n| 待检索 |  | 待核对 | 专有名词 |  |\n\n## 时间线与语境\n\n- 待补充\n\n## 翻译决定\n\n- 对话型字幕默认去掉句末句号\n- 未核实的专有名词必须回到对应时间抽帧/OCR/重听\n`;
+}
+
+function researchTemplateWithSpeakerIdentity(body) {
+  return researchTemplate(body)
+    .replace("## 人物与关系\n\n", "## 人物与关系\n\n> 角色名与对应声优必须归入同一个人物实体，不得拆成两个说话人。\n\n")
+    .replace("## 角色与成员色", "## 角色—声优配对\n\n| 人物实体 ID | 角色名 | 声优/出演者 | 当前素材中的发言身份 | 证据链接 | 置信度 |\n| --- | --- | --- | --- | --- | --- |\n| 待检索 | 待核实 | 待核实 | 角色 / 声优本人 / 待核实 |  | 低 |\n\n## 角色与成员色");
 }
 
 function researchPrompt(body, template) {
@@ -1467,8 +1558,11 @@ function researchPrompt(body, template) {
     : body.source ? "本地媒体（路径不提供；禁止访问本地文件）" : "尚未填写";
   return `这是一个独立的背景资料联网检索任务，不是字幕制作或媒体分析任务。生成一份可供用户检查和修改的中文 Markdown 预习文档。
 先检索作品、角色/出演者、关系、称呼、专有名词、活动或集数语境，优先使用用户指定站点与官方来源。
+必须把每个角色与其对应声优/出演者记录为同一个人物实体：同时保留 character_name 与 performer_name，不得因为两个名字都在资料中出现就拆成两个说话人。判断当前素材是在呈现角色对白，还是声优/出演者本人发言，并写为 speaking_as=character、performer 或 unknown；动画正片通常是角色，访谈、舞台、广播与活动现场通常是声优本人，但必须以当前素材证据为准。
+必须把主要人物的角色色、成员色或应援色作为独立检索项目：先找官方角色资料、艺人/组合页面、活动物料、官方应援或商品说明，再用可靠资料交叉核对。区分角色色、团体成员色与出演者个人应援色，不得混为一谈。
+只有来源明确给出 HEX 时才写 HEX；只有色名时保留色名并将 HEX 留空。不得把服装颜色、舞台灯光或随手从截图取样的颜色冒充官方色。查不到时写“待核实”，并说明后续使用确定性回退色。
 每条事实都附来源 URL 和置信度；搜索不到就明确写“待核实”，禁止凭印象补全。
-保留人物关系表、术语表、时间线与翻译决定，并记录后续应在视频哪个位置抽帧/OCR 的疑点。
+保留人物关系表、角色—声优配对表、角色与成员色表、术语表、时间线与翻译决定，并记录后续应在视频哪个位置抽帧/OCR 的疑点。
 本次只允许使用配置好的联网搜索与网页正文工具。不要读取任何字幕 Skill/Harness，不要运行 Shell，不要检查、打开、探测或转码本地视频，不要抽帧、OCR、听写、创建任务目录或制作字幕。
 只输出完成后的 Markdown 文档，不输出执行说明。
 
@@ -1635,7 +1729,7 @@ function plannedQueries(text) {
 async function generateResearchWithSelectedEngine(engine, prompt, search, run) {
   run.stage = "所选模型正在制定检索词";
   run.events.push({ kind: "status", text: "第一步所选模型正在制定检索计划" });
-  const plan = await selectedEngineText(engine, `根据下面的字幕预习目标，设计 3–5 条高质量网页搜索词，兼顾日文官方来源和中文官方译名核对。只返回 JSON：{"queries":["…"]}\n\n${prompt.slice(0, 24_000)}`, { maxTokens: 1200 });
+  const plan = await selectedEngineText(engine, `根据下面的字幕预习目标，设计 3–5 条高质量网页搜索词，兼顾日文官方来源和中文官方译名核对。其中至少一条必须专门检索主要人物的角色色、成员色或应援色；多人时优先用一条组合查询覆盖，不得省略该项目。只返回 JSON：{"queries":["…"]}\n\n${prompt.slice(0, 24_000)}`, { maxTokens: 1200 });
   const queries = plannedQueries(plan.text);
   if (!queries.length) throw new Error(`${plan.label} 没有返回可执行的检索词`);
   run.events.push(...queries.map((query) => ({ kind: "search", text: `${plan.label} 决定搜索：${query}` })));
@@ -1689,8 +1783,8 @@ function researchEvents(raw, agent) {
     const transportMessage = String(item.message || item.item?.message || "");
     if (/reconnecting|request timed out|connection refused|falling back.*http/i.test(transportMessage)) {
       const text = /falling back.*http/i.test(transportMessage)
-        ? "模型服务实时连接不稳定，Agent 已自动切换到 HTTP 继续"
-        : "模型服务连接超时，Agent 正在自动重试";
+        ? "Agent 编排通道响应较慢，已自动切换到 HTTPS 继续；这不代表翻译模型 API 失败"
+        : "Agent 编排通道响应较慢，正在自动重试；已完成的模型结果不会丢失";
       events.push({ kind: "status", text });
     }
     const pushTool = (name, input = {}) => {
@@ -2170,6 +2264,53 @@ async function runMultimodalEngineTest(engine, messages) {
   };
 }
 
+function endpointOrigin(value) {
+  try { return new URL(String(value || "")).origin; } catch { return String(value || "").trim().replace(/\/$/, ""); }
+}
+
+function externalProcessingPlan(config) {
+  const services = [];
+  const dataTypes = new Set();
+  if (config.engine?.mode === "api") {
+    const preset = presetFor(config.engine);
+    services.push({ purpose: "translation_review", provider: String(config.engine.provider || "compatible"), model: String(config.engine.model || preset.models[0] || ""), endpointOrigin: endpointOrigin(preset.baseUrl) });
+    ["预习与检索上下文", "听写文本", "字幕译文", "必要的疑点画面裁切/OCR 信息"].forEach((item) => dataTypes.add(item));
+  }
+  if (config.transcription?.mode === "api") {
+    services.push({ purpose: "transcription", provider: String(config.transcription.provider || "compatible_audio"), model: String(config.transcription.model || ""), endpointOrigin: endpointOrigin(config.transcription.baseUrl) });
+    ["约 20 秒测试音频", "正式听写音频分块"].forEach((item) => dataTypes.add(item));
+  }
+  return {
+    required: services.length > 0,
+    services,
+    dataTypes: [...dataTypes],
+    fingerprint: services.map((item) => `${item.purpose}:${item.provider}:${item.model}:${item.endpointOrigin}`).join("|"),
+  };
+}
+
+function externalProcessingConsentStatus(config) {
+  const plan = externalProcessingPlan(config);
+  if (!plan.required) return { ...plan, granted: true, grantedAt: null, currentTaskOnly: true };
+  const consent = config.externalProcessingConsent;
+  const grantedAt = Date.parse(String(consent?.grantedAt || ""));
+  const valid = consent?.version === 1
+    && consent?.granted === true
+    && consent?.currentTaskOnly === true
+    && consent?.fingerprint === plan.fingerprint
+    && Number.isFinite(grantedAt);
+  return { ...plan, granted: valid, grantedAt: valid ? new Date(grantedAt).toISOString() : null, currentTaskOnly: true, version: 1 };
+}
+
+function verifiedExternalProcessingConsent(config) {
+  const status = externalProcessingConsentStatus(config);
+  if (!status.required) return status;
+  const valid = status.granted;
+  if (!valid) {
+    throw new Error("需要先确认外部模型处理授权：当前任务会把听写文本、翻译上下文及必要的疑点证据发送给所选 API；请回到 GakuNiku 第四步勾选内联授权项后再开始或续跑。");
+  }
+  return status;
+}
+
 function initialManifest(config) {
   return {
     schema_version: 1,
@@ -2179,7 +2320,9 @@ function initialManifest(config) {
     phases: Object.fromEntries(phaseIds.map((id) => [id, { status: "pending", evidence: [] }])),
     artifacts: {},
     review_policy: { ambiguities: ambiguityReviewModeFromConfig(config) },
+    external_processing: verifiedExternalProcessingConsent(config),
     limitations: [],
+    notices: [],
   };
 }
 
@@ -2193,6 +2336,7 @@ function sanitizedConfig(config) {
 }
 
 function buildPrompt(config, jobDirectory, context = {}) {
+  const externalConsent = verifiedExternalProcessingConsent(config);
   const sitePolicies = {
     official: "作品、活动、出演者的官方网站与官方社交账号",
     wikipedia: "ja.wikipedia.org 与 zh.wikipedia.org（只作交叉核对）",
@@ -2217,6 +2361,10 @@ function buildPrompt(config, jobDirectory, context = {}) {
     `源语言: ${config.sourceLanguage || "ja"}`,
     `目标语言: ${config.targetLanguage || "zh-CN"}`,
     `输出格式: ${(config.formats ?? []).join(", ")}`,
+    ...(externalConsent.required ? [
+      `外部处理知情授权（已由用户在 GakuNiku 界面为当前任务明确确认）: 授权时间 ${externalConsent.grantedAt}；授权服务 ${externalConsent.services.map((item) => `${item.provider}/${item.model} (${item.endpointOrigin})`).join("、")}；授权数据 ${externalConsent.dataTypes.join("、")}。`,
+      "这是本任务可审计的明确用户授权。只在完成当前字幕任务所必需的范围内调用上述服务；不得再次因为发送已授权的听写文本、翻译上下文或必要疑点证据而阻塞或索要授权。不得公开素材、转交未列出的服务，且本地听写模式不得上传整段视频或音频。",
+    ] : ["本任务未使用外部 API，不需要发送媒体衍生数据。"]),
     `用户确认的本次成片约束: ${String(config.deliveryConstraints || "最多两行、无多余句末句号、说话起止严格贴合、角色色描边发光、OCR 抽帧检查。").trim()}。把它作为本任务的明确验收要求执行并写入最终验证报告。`,
     `听写引擎: ${config.transcription?.mode || "local"}/${config.transcription?.provider || "faster_whisper"}/${config.transcription?.model || "turbo"}`,
     `听写质量: ${config.transcription?.quality || "balanced"}；原文语言 ${config.transcription?.language || config.sourceLanguage || "ja"}；beam size ${config.transcription?.beamSize || 5}；分块 ${config.transcription?.chunkMinutes || 10} 分钟；词级时间戳 ${config.transcription?.wordTimestamps === false ? "关闭" : "开启"}；说话人分离 ${config.transcription?.diarization === false ? "关闭" : "开启"}；二次复核 ${config.transcription?.secondPass ? "开启" : "关闭"}。`,
@@ -2241,19 +2389,25 @@ function buildPrompt(config, jobDirectory, context = {}) {
     `联网检索工具: ${searchConfig(config.search || { provider: "exa" }).preset.label}。研究阶段必须实际执行多次检索、打开关键来源正文并保存直接 URL；优先官方来源，粉丝站只作语境补充。单个搜索词或网页发生 404、拒绝访问、超时或提取失败时，记录为来源警告并继续其他查询，不得结束整个任务；只有工具整体不可用或全部查询都无证据时才阻塞。工具调用会展示给用户，请让查询词和来源选择清晰可审计。`,
     `思考强度: ${config.engine?.reasoning || "medium"}。在疑点复核和专有名词判定中按此强度投入推理，但仍须以证据为准。`,
     ambiguityReviewPolicyPrompt(ambiguityReviewModeFromConfig(config)),
-    ...(context.researchPreview ? [`用户核对后的预习文档: ${context.researchPreview}。先核验其中标记为待核或低置信度的内容，再补充研究。`] : []),
+    ...(context.researchPreview ? [
+      `用户已经核对并确认了预习文档: ${context.researchPreview}。它是本任务可直接复用的研究基线，不得从零重复通用检索。`,
+      "先从该文档提取 brief、sources、glossary 与 speakers。角色名与对应声优必须写入同一 speaker_entity_id 的一行，分别保存 character_name、performer_name 与 speaking_as，绝不能因为两个名字都出现就拆成两个说话人；再把“角色与成员色”表中的色名、HEX、适用身份、来源类型、URL 与置信度写入同一行。只对文档明确标为待核/低置信度、与当前片段身份冲突、或片段新增且会改变译意的事实做差量核验；默认最多 3 条定向查询、打开最多 4 个高价值正文来源。若没有这些缺口，直接落盘四份研究产物并完成研究阶段。",
+    ] : []),
     ...(context.knowledgePaths?.length ? [`用户调取的本地知识库文档: ${context.knowledgePaths.join(", ")}。知识库是线索，冲突时以当前官方来源为准。`] : []),
     ...(config.engine?.mode === "api" ? [
       `用户在第一步指定并验证的研究/翻译模型: ${config.engine.provider}/${config.engine.model}。本地 Agent 只负责工具编排；检索词规划、结果筛选、证据归纳、语义判断与每批翻译必须调用用户所选模型，不得用 Codex、Claude 或其他编排模型替代。`,
       `调用方法: 先写 JSON 输入文件 {"messages":[{"role":"system","content":"..."},{"role":"user","content":"..."}]}，再运行 node ${apiHelperPath} 输入文件 输出文件；读取输出 JSON 的 text 字段。按段调用，单次输入不超过 2 MB。`,
+      "稳定性约束: 模型与检索的完整输入/输出必须留在磁盘文件，禁止在命令后追加 cat、完整 jq -r .text 或循环打印整份结果。每次终端回显控制在 4 KB 内，只查看必要字段、计数或分段摘要；需要转换大 JSON 时直接由脚本读写文件。不得把大段工具输出回灌给编排 Agent。",
     ] : []),
     ...(config.engine?.mode === "gpu" ? [
       `用户在第一步指定并验证的研究/翻译模型: Ollama/${config.engine.gpuModel || config.engine.model}。本地 Agent 只负责工具编排；检索词规划、结果筛选、证据归纳、语义判断与每批翻译必须通过 Ollama 调用该模型，不得用 Codex、Claude 或其他编排模型替代。`,
       "调用本地模型时使用磁盘分批输入，控制上下文大小，避免一次载入整份转写或视频。",
     ] : []),
     "字幕硬约束: 每个逻辑字幕最多两行；充分利用横向安全区；对话型中文字幕默认不在每条末尾添加句号‘。’，但保留句中的句号以及必要的问号、感叹号、省略号和破折号；从该人开口的第一个词出现，到最后一个词结束时消失；可靠角色色用于外圈描边、柔光和投影；不可靠时使用确定性随机色并记录；疑点先分级，只有画面文字确实可能解疑时才抽帧/OCR。",
+    "人物实体硬约束: 一个角色及其对应声优/出演者只能生成一个人物实体。roles 中同时保存 characterName、performerName 与 speakingAs；动画/剧情角色对白使用 speakingAs=character，访谈、舞台、广播或活动中本人发言使用 speakingAs=performer，证据不足用 unknown。name 必须等于当前发言身份对应的名字。不得把角色名和声优名拆成两个 role，也不得把作品名、组合名、活动名或匿名聚类标签当成人物。",
     "资源约束: 不得把完整视频读入内存；音频以 5–10 分钟分块并保留 2–5 秒重叠；子进程与转写结果直接落盘。",
-    `精修数据: 完成字幕后额外写出 ${path.join(jobDirectory, "work", "studio-review.json")}，JSON 结构为 {"roles":[{"id":"...","name":"...","color":"#RRGGBB"}],"cues":[{"id":1,"start":0.0,"end":1.0,"speakerId":"...","source":"...","translation":"...","confidence":0.95,"flagged":false}]}。该文件只含文本和时间码，不嵌入媒体。`,
+    `精修数据: 完成字幕后额外写出 ${path.join(jobDirectory, "work", "studio-review.json")}，JSON 结构为 {"roles":[{"id":"同一角色—声优对的稳定实体 ID","name":"当前字幕显示名","characterName":"角色名或空串","performerName":"声优/出演者名或空串","speakingAs":"character|performer|unknown","color":"#RRGGBB","colorSource":{"kind":"official|evidence|user|fallback","reference":"直接来源 URL、用户确认或回退规则"}}],"cues":[{"id":1,"start":0.0,"end":1.0,"speakerId":"...","source":"...","translation":"...","confidence":0.95,"flagged":false}]}。同一角色—声优对只能有一条 role；该文件只含文本和时间码，不嵌入媒体。`,
+    "清单语义: manifest.limitations 只记录尚未解决且会实质影响字幕语义、可读性、媒体完整性或交付验收的问题。已经按约定成功使用的确定性角色色回退、已解决但为可选人工复看而保留 flagged=true 的句子，都写入 manifest.notices 与相应报告/精修数据，不得列为 limitation。",
     "开始前读取 SKILL.md 及其直接引用的三个 reference。每开始一个阶段将 manifest 对应 status 写为 in_progress，每完成则写为 complete 并记录 evidence；无法继续写 blocked 和原因。完成后保留 SRT、ASS、封装视频和验证报告。",
   ].join("\n");
 }
@@ -2301,7 +2455,7 @@ function adapter(config) {
 function adapterArguments(name, config, prompt, searchAgentConfig = { codexArgs: [], claudeArgs: [] }) {
   const modelArgs = config.engine?.mode !== "api" && config.engine?.model ? ["--model", config.engine.model] : [];
   const reasoning = config.engine?.reasoning || "medium";
-  if (name === "codex") return [...searchAgentConfig.codexArgs, "exec", "--json", "--skip-git-repo-check", "-c", `model_reasoning_effort="${reasoning}"`, ...modelArgs, prompt];
+  if (name === "codex") return [...searchAgentConfig.codexArgs, "exec", "--ephemeral", "--json", "--skip-git-repo-check", "--disable", "plugins", "--disable", "apps", "--disable", "tool_suggest", "-c", `model_reasoning_effort="${reasoning}"`, ...modelArgs, prompt];
   if (name === "claude") return ["-p", prompt, ...modelArgs, "--effort", reasoning, "--output-format", "stream-json", "--verbose", ...searchAgentConfig.claudeArgs];
   if (name === "opencode") return ["run", "--format", "json", ...(config.engine?.model ? ["--model", config.engine.model] : []), prompt];
   if (name === "pi") return ["-p", "--mode", "json", prompt];
@@ -2316,6 +2470,7 @@ async function launchJob(config) {
   if (kind === "unknown") throw new Error("无法识别视频位置，请使用本地完整路径或 yt-dlp 支持的网页链接。 ");
   if (!String(config.outputPath || "").trim()) throw new Error("输出路径不能为空。 ");
   if (!Array.isArray(config.formats) || !config.formats.length) throw new Error("至少选择一种输出格式。 ");
+  verifiedExternalProcessingConsent(config);
   const transcriptionCheck = await transcriptionEnvironment(config.transcription || {});
   if (!transcriptionCheck.ready) {
     const missing = transcriptionCheck.components.filter((item) => item.status === "missing").map((item) => item.label).join("、");
@@ -2367,20 +2522,29 @@ async function launchJob(config) {
     env: selected.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  activeJobProcesses.set(id, child);
   child.stdout.pipe(outputLog);
   child.stderr.pipe(errorLog);
   state.pid = child.pid;
   await writeJsonFile(stateFile, state);
   child.on("error", async (error) => {
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
-    await writeJsonFile(stateFile, { ...state, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
+    activeJobProcesses.delete(id);
+    const latest = await readJsonFile(stateFile, state);
+    if (latest.status === "cancelled") return;
+    await writeJsonFile(stateFile, { ...latest, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
   });
   child.on("close", async (code, signal) => {
+    activeJobProcesses.delete(id);
     outputLog.end();
     errorLog.end();
     await Promise.all([finished(outputLog).catch(() => {}), finished(errorLog).catch(() => {})]);
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
     const latest = await readJsonFile(stateFile, state);
+    if (latest.status === "cancelled") {
+      await writeJsonFile(stateFile, { ...latest, exitCode: code, signal, finishedAt: latest.finishedAt || new Date().toISOString() });
+      return;
+    }
     const manifest = await readJsonFile(path.join(jobDirectory, "manifest.json"), {});
     const blocked = phaseIds.find((id) => ["blocked", "error"].includes(workflowPhaseStatus(id, manifest.phases?.[id])));
     const incomplete = phaseIds.find((id) => !["complete", "completed", "skipped"].includes(workflowPhaseStatus(id, manifest.phases?.[id])));
@@ -2411,10 +2575,124 @@ function processAlive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+function processTreePids(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return [];
+  if (process.platform === "win32") return [pid];
+  const listed = spawnSync("ps", ["-Ao", "pid=,ppid="], { encoding: "utf8", timeout: 2_000 });
+  if (listed.status !== 0 || !listed.stdout) return [pid];
+  const children = new Map();
+  for (const line of String(listed.stdout).split("\n")) {
+    const [childText, parentText] = line.trim().split(/\s+/);
+    const child = Number(childText);
+    const parent = Number(parentText);
+    if (!Number.isInteger(child) || !Number.isInteger(parent)) continue;
+    const siblings = children.get(parent) || [];
+    siblings.push(child);
+    children.set(parent, siblings);
+  }
+  const ordered = [];
+  const visit = (current) => {
+    for (const child of children.get(current) || []) visit(child);
+    ordered.push(current);
+  };
+  visit(pid);
+  return [...new Set(ordered)];
+}
+
+function stopJobProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5_000 });
+    return;
+  }
+  const targets = processTreePids(pid);
+  for (const target of targets) {
+    try { process.kill(target, "SIGTERM"); } catch { /* process may already have exited */ }
+  }
+  const forceTimer = setTimeout(() => {
+    for (const target of targets) {
+      if (!processAlive(target)) continue;
+      try { process.kill(target, "SIGKILL"); } catch { /* process may already have exited */ }
+    }
+  }, 2_500);
+  forceTimer.unref?.();
+}
+
+const informationalLimitationRules = [
+  {
+    test: (value) => /role colou?rs?|角色色|应援色/i.test(value)
+      && /fallback|回退|presentation metadata|did not establish|not established|未建立|未确认/i.test(value)
+      && !/unreadable|illegible|failed|incorrect|wrong|clipp|low contrast|无法辨认|不可读|失败|错误|不正确|遮挡|对比度不足/i.test(value),
+    message: "角色色：研究资料未提供可核验的官方色值，已按项目规则使用确定性回退色；这属于样式来源说明，不影响字幕内容或成片验收。",
+  },
+  {
+    test: (value) => /resolved|已解决/i.test(value)
+      && /flagged\s*=\s*true|复看标记/i.test(value)
+      && /optional|可选|refinement|精修/i.test(value)
+      && !/failed|incorrect|wrong|unresolved|失败|错误|未解决/i.test(value),
+    message: "精修提示：已解决的疑点仍保留可选人工复看标记，可在精修台检查；该标记不阻塞成片。",
+  },
+];
+
+function manifestPresentationNotes(manifest = {}) {
+  const limitations = [];
+  const notices = [];
+  for (const item of Array.isArray(manifest.notices) ? manifest.notices : []) {
+    const value = typeof item === "string" ? item : String(item?.message || item?.detail || item?.label || "").trim();
+    if (value && !notices.includes(value)) notices.push(value);
+  }
+  for (const item of Array.isArray(manifest.limitations) ? manifest.limitations : []) {
+    const value = String(item || "").trim();
+    if (!value) continue;
+    const informational = informationalLimitationRules.find((rule) => rule.test(value));
+    if (informational) {
+      if (!notices.includes(informational.message)) notices.push(informational.message);
+    } else {
+      limitations.push(value);
+    }
+  }
+  return { limitations, notices };
+}
+
+async function terminateJob(id) {
+  const jobDirectory = safeJobDirectory(id);
+  const stateFile = path.join(jobDirectory, "job-state.json");
+  const state = await readJsonFile(stateFile);
+  if (!state) throw new Error("任务不存在");
+  const child = activeJobProcesses.get(id);
+  if (state.status === "completed" || state.status === "cancelled") {
+    if (child?.pid) stopJobProcessTree(Number(child.pid));
+    activeJobProcesses.delete(id);
+    const alreadyCompleted = state.status === "completed";
+    return {
+      id,
+      status: state.status,
+      message: alreadyCompleted ? "任务已经完成，无需再次终止" : "任务已经处于终止状态，已有成果仍然保留",
+      resumable: !alreadyCompleted,
+      alreadyStopped: true,
+    };
+  }
+  const stoppedAt = new Date().toISOString();
+  const cancelled = {
+    ...state,
+    status: "cancelled",
+    message: "任务已终止，已有成果已保留，可从断点继续",
+    cancelledAt: stoppedAt,
+    finishedAt: stoppedAt,
+  };
+  delete cancelled.error;
+  delete cancelled.blocker;
+  await writeJsonFile(stateFile, cancelled);
+  const pid = Number(child?.pid || (state.status === "running" ? state.pid : 0));
+  stopJobProcessTree(pid);
+  activeJobProcesses.delete(id);
+  return { id, status: "cancelled", message: cancelled.message, resumable: true };
+}
+
 function phaseBlocker(manifest, id) {
   const phase = manifest.phases?.[id] || {};
   const evidence = Array.isArray(phase.evidence) ? phase.evidence.map(String) : [];
-  const limitations = Array.isArray(manifest.limitations) ? manifest.limitations.map(String) : [];
+  const { limitations } = manifestPresentationNotes(manifest);
   let detail = String(phase.error || phase.reason || phase.detail || phase.message || limitations[0] || evidence.at(-1) || `阶段 ${id} 无法继续`);
   if (id === "source_transcript" && /faster-whisper|ctranslate2|whisperx/i.test(detail) && /not installed|missing|blocked/i.test(detail)) {
     detail = "原文听写所需的 Faster-Whisper / CTranslate2 尚未安装；若启用了说话人分离，还需要 WhisperX。获取素材与背景预习成果已经保留，准备好听写环境后可从本阶段继续。";
@@ -2506,10 +2784,20 @@ async function resumeJob(id, body) {
     transcription: { ...(stored.transcription || {}), ...(body.transcription || {}) },
     search: { ...(stored.search || {}), ...(body.search || {}) },
   };
+  const externalConsent = verifiedExternalProcessingConsent(config);
   const transcriptionCheck = await transcriptionEnvironment(config.transcription || {});
   if (!transcriptionCheck.ready) throw new Error(`听写环境尚未准备：${transcriptionCheck.recommendation}`);
   const validated = await validateResumeManifest(jobDirectory, existingManifest, config);
   if (!validated.resumeFrom) throw new Error("所有阶段均已完成，无需续跑");
+  validated.manifest.external_processing = externalConsent;
+  if (externalConsent.required && externalConsent.granted) {
+    const resolvedAuthorization = /authoriz|consent|授权|media-derived|external model service/i;
+    validated.manifest.limitations = (Array.isArray(validated.manifest.limitations) ? validated.manifest.limitations : []).filter((item) => !resolvedAuthorization.test(String(item)));
+    for (const phase of Object.values(validated.manifest.phases || {})) {
+      if (resolvedAuthorization.test(String(phase?.blocking_reason || ""))) delete phase.blocking_reason;
+      if (resolvedAuthorization.test(String(phase?.reason || ""))) delete phase.reason;
+    }
+  }
   await writeJsonFile(path.join(jobDirectory, "manifest.json"), validated.manifest);
   const context = {
     resumeFrom: validated.resumeFrom,
@@ -2541,35 +2829,104 @@ async function resumeJob(id, body) {
   const outputLog = createWriteStream(path.join(jobDirectory, "logs", "agent.ndjson"), { flags: "a" });
   const errorLog = createWriteStream(path.join(jobDirectory, "logs", "agent.stderr.log"), { flags: "a" });
   const child = spawn(selected.command, args, { cwd: jobDirectory, env: selected.env, stdio: ["ignore", "pipe", "pipe"] });
+  activeJobProcesses.set(id, child);
   child.stdout.pipe(outputLog);
   child.stderr.pipe(errorLog);
   nextState.pid = child.pid;
   await writeJsonFile(stateFile, nextState);
   child.on("error", async (error) => {
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
-    await writeJsonFile(stateFile, { ...nextState, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
+    activeJobProcesses.delete(id);
+    const latest = await readJsonFile(stateFile, nextState);
+    if (latest.status === "cancelled") return;
+    await writeJsonFile(stateFile, { ...latest, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
   });
   child.on("close", async (code, signal) => {
+    activeJobProcesses.delete(id);
     outputLog.end(); errorLog.end();
     await Promise.all([finished(outputLog).catch(() => {}), finished(errorLog).catch(() => {})]);
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
+    const latestState = await readJsonFile(stateFile, nextState);
+    if (latestState.status === "cancelled") {
+      await writeJsonFile(stateFile, { ...latestState, exitCode: code, signal, finishedAt: latestState.finishedAt || new Date().toISOString() });
+      return;
+    }
     const latestManifest = await readJsonFile(path.join(jobDirectory, "manifest.json"), {});
     const blocked = phaseIds.find((phaseId) => ["blocked", "error"].includes(workflowPhaseStatus(phaseId, latestManifest.phases?.[phaseId])));
     const incomplete = phaseIds.find((phaseId) => !["complete", "completed", "skipped"].includes(workflowPhaseStatus(phaseId, latestManifest.phases?.[phaseId])));
     const terminal = blocked ? "blocked" : !incomplete ? "completed" : "failed";
     const blocker = blocked ? phaseBlocker(latestManifest, blocked) : null;
-    await writeJsonFile(stateFile, { ...(await readJsonFile(stateFile, nextState)), status: terminal, exitCode: code, signal, ...(terminal === "completed" ? { message: "任务已完成，等待精修" } : terminal === "blocked" ? { blocker, error: blocker.detail, message: `${blocker.label}：需要处理` } : { error: `Agent 退出，代码 ${code ?? "unknown"}` }), finishedAt: new Date().toISOString() });
+    await writeJsonFile(stateFile, { ...latestState, status: terminal, exitCode: code, signal, ...(terminal === "completed" ? { message: "任务已完成，等待精修" } : terminal === "blocked" ? { blocker, error: blocker.detail, message: `${blocker.label}：需要处理` } : { error: `Agent 退出，代码 ${code ?? "unknown"}` }), finishedAt: new Date().toISOString() });
   });
   return { id, status: "running", resumeFrom: validated.resumeFrom, warnings: validated.warnings, attempt };
 }
 
+function normalizeStudioReview(review) {
+  if (!review || typeof review !== "object" || !Array.isArray(review.roles)) return review;
+  const roles = [];
+  const entityIndex = new Map();
+  const idRemap = new Map();
+  for (const [index, rawRole] of review.roles.entries()) {
+    if (!rawRole || typeof rawRole !== "object") continue;
+    const originalId = String(rawRole.id || `speaker-${index + 1}`);
+    const characterName = String(rawRole.characterName || "").trim();
+    const performerName = String(rawRole.performerName || "").trim();
+    const rawName = String(rawRole.name || "").trim();
+    const speakingAs = ["character", "performer"].includes(String(rawRole.speakingAs))
+      ? String(rawRole.speakingAs)
+      : rawName && performerName && rawName === performerName
+        ? "performer"
+        : rawName && characterName && rawName === characterName
+          ? "character"
+          : "unknown";
+    const name = speakingAs === "performer"
+      ? performerName || rawName || characterName
+      : speakingAs === "character"
+        ? characterName || rawName || performerName
+        : rawName || characterName || performerName || `未确认人物 ${index + 1}`;
+    const pairKey = characterName && performerName ? `pair:${characterName.toLocaleLowerCase()}\u0000${performerName.toLocaleLowerCase()}` : `id:${originalId}`;
+    const normalized = {
+      ...rawRole,
+      id: originalId,
+      name,
+      characterName,
+      performerName,
+      speakingAs,
+      color: /^#[0-9a-f]{6}$/i.test(String(rawRole.color || "")) ? rawRole.color : "#A78BFA",
+    };
+    if (entityIndex.has(pairKey)) {
+      const targetIndex = entityIndex.get(pairKey);
+      const existing = roles[targetIndex];
+      roles[targetIndex] = {
+        ...existing,
+        ...normalized,
+        id: existing.id,
+        characterName: existing.characterName || normalized.characterName,
+        performerName: existing.performerName || normalized.performerName,
+        speakingAs: existing.speakingAs !== "unknown" ? existing.speakingAs : normalized.speakingAs,
+        name: existing.speakingAs !== "unknown" ? existing.name : normalized.name,
+      };
+      idRemap.set(originalId, existing.id);
+    } else {
+      entityIndex.set(pairKey, roles.length);
+      roles.push(normalized);
+      idRemap.set(originalId, originalId);
+    }
+  }
+  const cues = Array.isArray(review.cues)
+    ? review.cues.map((cue) => cue && typeof cue === "object" ? { ...cue, speakerId: idRemap.get(String(cue.speakerId || "")) || cue.speakerId } : cue)
+    : review.cues;
+  return { ...review, roles, cues };
+}
+
 async function jobStatus(id) {
   const directory = safeJobDirectory(id);
-  const [state, manifest, review] = await Promise.all([
+  const [state, manifest, rawReview] = await Promise.all([
     readJsonFile(path.join(directory, "job-state.json")),
     readJsonFile(path.join(directory, "manifest.json")),
     readJsonFile(path.join(directory, "work", "studio-review.json")),
   ]);
+  const review = normalizeStudioReview(rawReview);
   if (!state || !manifest) throw new Error("任务不存在");
   let effectiveState = state;
   const blockedPhase = phaseIds.find((phaseId) => ["blocked", "error"].includes(workflowPhaseStatus(phaseId, manifest.phases?.[phaseId])));
@@ -2591,7 +2948,7 @@ async function jobStatus(id) {
       };
     }
     await writeJsonFile(path.join(directory, "job-state.json"), effectiveState);
-  } else if (blockedPhase) {
+  } else if (state.status !== "cancelled" && blockedPhase) {
     const blocker = phaseBlocker(manifest, blockedPhase);
     effectiveState = { ...state, status: "blocked", blocker, message: `${blocker.label}：需要处理`, error: blocker.detail };
     if (JSON.stringify(state.blocker) !== JSON.stringify(blocker) || state.error !== blocker.detail) {
@@ -2647,21 +3004,49 @@ async function jobStatus(id) {
   const resources = await jobResources(directory, effectiveState);
   const tokenUsage = await jobTokenUsage(directory);
   const diagnostics = ["blocked", "failed"].includes(effectiveState.status) ? await jobDiagnostics(directory) : null;
+  const storedConfig = await readJsonFile(path.join(directory, "studio-job.json"), {});
+  const manifestNotes = manifestPresentationNotes(manifest);
   return {
     ...effectiveState,
     phases,
     phaseDetails,
     reviewPolicy: manifest.review_policy || { ambiguities: "pragmatic" },
+    externalProcessingConsent: externalProcessingConsentStatus(storedConfig),
     progress,
     message: currentPhase ? phaseLabels[currentPhase] : effectiveState.message,
-    manifest: { artifacts: manifest.artifacts, limitations: manifest.limitations },
+    manifest: { artifacts: manifest.artifacts, limitations: manifestNotes.limitations, notices: manifestNotes.notices },
     resources,
     tokenUsage,
     diagnostics,
     review,
     mediaUrl: media ? `/api/jobs/${id}/media` : null,
-    trace: configTraceEnabled(await readJsonFile(path.join(directory, "studio-job.json"))) ? await jobTrace(directory) : [],
+    trace: configTraceEnabled(storedConfig) ? await jobTrace(directory) : [],
   };
+}
+
+async function jobHistory() {
+  const entries = await readdir(jobsRoot, { withFileTypes: true }).catch(() => []);
+  const jobs = await Promise.all(entries
+    .filter((entry) => entry.isDirectory() && /^[a-f0-9-]{36}$/i.test(entry.name))
+    .map(async (entry) => {
+      const directory = path.join(jobsRoot, entry.name);
+      const [state, config, info] = await Promise.all([
+        readJsonFile(path.join(directory, "job-state.json"), {}),
+        readJsonFile(path.join(directory, "studio-job.json"), {}),
+        stat(directory).catch(() => null),
+      ]);
+      const createdAt = state.createdAt || state.startedAt || config.createdAt || info?.birthtime?.toISOString?.() || info?.mtime?.toISOString?.() || "";
+      const updatedAt = state.finishedAt || state.updatedAt || state.reconciledAt || info?.mtime?.toISOString?.() || createdAt;
+      return {
+        id: entry.name,
+        status: String(state.status || "unknown"),
+        message: String(state.message || ""),
+        source: String(config.source || ""),
+        createdAt,
+        updatedAt,
+      };
+    }));
+  return jobs.sort((left, right) => Date.parse(right.updatedAt || right.createdAt) - Date.parse(left.updatedAt || left.createdAt)).slice(0, 60);
 }
 
 async function jobTokenUsage(directory) {
@@ -3003,7 +3388,7 @@ async function route(request) {
   if (request.method === "GET" && researchStatusMatch) return json(request, 200, await researchRunStatus(researchStatusMatch[1]));
   if (request.method === "POST" && url.pathname === "/api/research/preview") {
     const body = await readJson(request);
-    const template = researchTemplate(body.research || {});
+    const template = researchTemplateWithSpeakerIdentity(body.research || {});
     const knowledgeContext = await researchKnowledgeContext(body.research?.knowledgeIds || []);
     const prompt = `${researchPrompt(body, template)}${knowledgeContext ? `\n\n以下是用户主动调取的本地知识库线索。必须重新联网核对；与当前官方来源冲突时以官方来源为准：\n\n${knowledgeContext}` : ""}`;
     if (!body.engine?.mode) throw new Error("请先在第一步设置并测试翻译模型");
@@ -3018,6 +3403,7 @@ async function route(request) {
     const body = await readJson(request);
     return json(request, 200, { kind: sourceKind(body.source) });
   }
+  if (request.method === "GET" && url.pathname === "/api/jobs") return json(request, 200, { jobs: await jobHistory() });
   if (request.method === "POST" && url.pathname === "/api/jobs") {
     const body = await readJson(request);
     return json(request, 201, await launchJob(body));
@@ -3027,6 +3413,8 @@ async function route(request) {
     const body = await readJson(request);
     return json(request, 202, await resumeJob(resumeMatch[1], body));
   }
+  const cancelMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/cancel$/);
+  if (request.method === "POST" && cancelMatch) return json(request, 200, await terminateJob(cancelMatch[1]));
   const mediaMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/media$/);
   if (request.method === "GET" && mediaMatch) return mediaResponse(request, mediaMatch[1]);
   const localMediaMatch = url.pathname.match(/^\/api\/local-media\/([^/]+)$/);

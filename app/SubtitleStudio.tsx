@@ -16,6 +16,7 @@ import {
   Brain,
   CaretRight,
   CheckCircle,
+  ClockCounterClockwise,
   CursorClick,
   FilmStrip,
   FloppyDisk,
@@ -45,11 +46,26 @@ type PrepareStage = "engine" | "source" | "research" | "harness";
 type TranscriptionMode = "local" | "api";
 type AmbiguityReviewMode = "fast" | "pragmatic" | "strict";
 type PhaseStatus = "pending" | "running" | "done" | "blocked" | "error" | "skipped";
+type JobRunStatus = "idle" | "running" | "blocked" | "failed" | "cancelled" | "completed";
+type HistoricalJob = { id: string; status: string; message: string; source: string; createdAt: string; updatedAt: string };
+type SpeakerIdentity = "character" | "performer" | "unknown";
+type ExternalProcessingConsent = {
+  version: 1;
+  granted: true;
+  grantedAt: string;
+  currentTaskOnly: true;
+  fingerprint: string;
+  services: Array<{ purpose: "translation_review" | "transcription"; provider: string; model: string; endpointOrigin: string }>;
+  dataTypes: string[];
+};
 
 type Role = {
   id: string;
   name: string;
   color: string;
+  characterName?: string;
+  performerName?: string;
+  speakingAs?: SpeakerIdentity;
 };
 
 type Cue = {
@@ -168,11 +184,22 @@ type ApiPreset = {
   label: string;
   baseUrl: string;
   models: string[];
+  multimodal: "native" | "unavailable" | "unknown";
   docsUrl?: string;
   checkedAt?: string;
   note?: string;
   pricing?: Record<string, ApiPriceRule>;
   pricingDocsUrl?: string;
+};
+
+type ModelCatalogCacheEntry = {
+  version: 2;
+  recommendedModels: string[];
+  allModels: string[];
+  pricing: Record<string, ApiPriceRule>;
+  source: string;
+  fetchedAt: string;
+  warning?: string;
 };
 
 type SearchPreset = {
@@ -290,20 +317,48 @@ type TranscriptionTestResult = {
 type PhaseDetail = { status: PhaseStatus; rawStatus: string; evidence: string[]; detail: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null; riskSummary?: Record<string, number> | null };
 type JobResources = { elapsedMs: number | null; diskBytes: number; diskLabel: string; attempt: number; process: null | { rssBytes: number; rssLabel: string; cpuPercent: number; memoryPercent: number; elapsed: string } };
 
+function endpointOrigin(value: string) {
+  try { return new URL(value).origin; } catch { return String(value || "").trim().replace(/\/$/, ""); }
+}
+
+function externalProcessingPlan(input: {
+  engineMode: EngineMode;
+  provider: string;
+  model: string;
+  baseUrl: string;
+  transcriptionMode: TranscriptionMode;
+  transcriptionProvider: string;
+  transcriptionModel: string;
+  transcriptionBaseUrl: string;
+}) {
+  const services: ExternalProcessingConsent["services"] = [];
+  const dataTypes = new Set<string>();
+  if (input.engineMode === "api") {
+    services.push({ purpose: "translation_review", provider: input.provider, model: input.model, endpointOrigin: endpointOrigin(input.baseUrl) });
+    ["预习与检索上下文", "听写文本", "字幕译文", "必要的疑点画面裁切/OCR 信息"].forEach((item) => dataTypes.add(item));
+  }
+  if (input.transcriptionMode === "api") {
+    services.push({ purpose: "transcription", provider: input.transcriptionProvider, model: input.transcriptionModel, endpointOrigin: endpointOrigin(input.transcriptionBaseUrl) });
+    ["约 20 秒测试音频", "正式听写音频分块"].forEach((item) => dataTypes.add(item));
+  }
+  const fingerprint = services.map((item) => `${item.purpose}:${item.provider}:${item.model}:${item.endpointOrigin}`).join("|");
+  return { required: services.length > 0, services, dataTypes: [...dataTypes], fingerprint };
+}
+
 const embeddedApiPricing = apiPricingManifest as ApiPricingManifest;
 const providerPricing = (provider: string) => embeddedApiPricing.providers[provider]?.models ?? {};
 const providerPricingDocs = (provider: string) => embeddedApiPricing.providers[provider]?.docsUrl;
 
 const fallbackApiPresets: Record<string, ApiPreset> = {
-  openai: { label: "GPT / OpenAI API", baseUrl: "https://api.openai.com/v1", models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"], docsUrl: "https://developers.openai.com/api/docs/models/all", checkedAt: "2026-08-13", note: "Sol 旗舰；Terra 均衡；Luna 高性价比", pricing: providerPricing("openai"), pricingDocsUrl: providerPricingDocs("openai") },
-  xai: { label: "Grok / xAI", baseUrl: "https://api.x.ai/v1", models: ["grok-4.5", "grok-4.3"], docsUrl: "https://docs.x.ai/developers/models/grok-4.5", checkedAt: "2026-08-13", note: "4.5 最新旗舰；4.3 通用低成本", pricing: providerPricing("xai"), pricingDocsUrl: providerPricingDocs("xai") },
-  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-pro", "deepseek-v4-flash"], docsUrl: "https://api-docs.deepseek.com/news/news260424/", checkedAt: "2026-08-13", note: "旧 chat / reasoner 别名已下线", pricing: providerPricing("deepseek"), pricingDocsUrl: providerPricingDocs("deepseek") },
-  kimi: { label: "Kimi / Moonshot（中国站）", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-k3", "kimi-k2.6"], docsUrl: "https://www.kimi.com/zh-cn/help/kimi-api/api-model-selection", checkedAt: "2026-08-13", note: "K3 旗舰；K2.6 支持思考开关", pricing: providerPricing("kimi"), pricingDocsUrl: providerPricingDocs("kimi") },
-  kimi_intl: { label: "Kimi / Moonshot（国际站）", baseUrl: "https://api.moonshot.ai/v1", models: ["kimi-k3", "kimi-k2.6"], docsUrl: "https://www.kimi.com/help/kimi-api/api-model-selection", checkedAt: "2026-08-13", note: "国际站 Key 与中国站 Key 不互通", pricing: providerPricing("kimi_intl"), pricingDocsUrl: providerPricingDocs("kimi_intl") },
-  mimo: { label: "小米 MiMo", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro", "mimo-v2.5"], docsUrl: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/model", checkedAt: "2026-08-13", note: "Pro 复杂推理；V2.5 全模态", pricing: providerPricing("mimo"), pricingDocsUrl: providerPricingDocs("mimo") },
-  minimax: { label: "MiniMax", baseUrl: "https://api.minimaxi.com/v1", models: ["MiniMax-M2.7", "MiniMax-M2.7-highspeed"], docsUrl: "https://platform.minimaxi.com/docs/guides/text-generation", checkedAt: "2026-08-13", note: "M2.7 标准版与高速版", pricing: providerPricing("minimax"), pricingDocsUrl: providerPricingDocs("minimax") },
-  glm: { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-5.2"], docsUrl: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2", checkedAt: "2026-08-13", note: "当前旗舰，1M 上下文", pricing: providerPricing("glm"), pricingDocsUrl: providerPricingDocs("glm") },
-  compatible: { label: "自定义兼容接口", baseUrl: "", models: [] },
+  openai: { label: "GPT / OpenAI API", baseUrl: "https://api.openai.com/v1", models: ["gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"], multimodal: "native", docsUrl: "https://developers.openai.com/api/docs/models/compare", checkedAt: "2026-08-16", note: "仅推荐官方当前支持图像输入的 5.6 系列；默认使用稳定旗舰别名 gpt-5.6", pricing: providerPricing("openai"), pricingDocsUrl: providerPricingDocs("openai") },
+  xai: { label: "Grok / xAI", baseUrl: "https://api.x.ai/v1", models: ["grok-4.6", "grok-4.6-latest"], multimodal: "native", docsUrl: "https://docs.x.ai/developers/models", checkedAt: "2026-08-16", note: "官方推荐 Grok 4.6 稳定别名；账户快照与内部版本不会抢占默认选择", pricing: providerPricing("xai"), pricingDocsUrl: providerPricingDocs("xai") },
+  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", models: [], multimodal: "unavailable", docsUrl: "https://api-docs.deepseek.com/updates", checkedAt: "2026-08-16", note: "DeepSeek V4 官方 API 当前是文本模型，不能通过本项目必需的图片能力测试", pricing: providerPricing("deepseek"), pricingDocsUrl: providerPricingDocs("deepseek") },
+  kimi: { label: "Kimi / Moonshot（中国站）", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"], multimodal: "native", docsUrl: "https://platform.kimi.com/docs/guide/use-kimi-vision-model", checkedAt: "2026-08-16", note: "K3 为通用多模态旗舰；K2.7 Code 与 K2.6 同样支持图像/视频输入", pricing: providerPricing("kimi"), pricingDocsUrl: providerPricingDocs("kimi") },
+  kimi_intl: { label: "Kimi / Moonshot（国际站）", baseUrl: "https://api.moonshot.ai/v1", models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"], multimodal: "native", docsUrl: "https://www.kimi.com/help/kimi-api/api-overview", checkedAt: "2026-08-16", note: "K3 为通用多模态旗舰；国际站 Key 与中国站 Key 不互通", pricing: providerPricing("kimi_intl"), pricingDocsUrl: providerPricingDocs("kimi_intl") },
+  mimo: { label: "小米 MiMo", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5"], multimodal: "native", docsUrl: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/model", checkedAt: "2026-08-16", note: "mimo-v2.5 是原生全模态模型；Pro 是文本/Agent 旗舰，不用于图像测试", pricing: providerPricing("mimo"), pricingDocsUrl: providerPricingDocs("mimo") },
+  minimax: { label: "MiniMax", baseUrl: "https://api.minimaxi.com/v1", models: [], multimodal: "unavailable", docsUrl: "https://platform.minimaxi.com/docs/api-reference/api-overview", checkedAt: "2026-08-16", note: "M2.7 官方定位为文本模型；图片理解需额外 MCP，不能作为直连多模态翻译引擎", pricing: providerPricing("minimax"), pricingDocsUrl: providerPricingDocs("minimax") },
+  glm: { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-5v-turbo", "glm-4.6v", "glm-4.6v-flashx", "glm-4.6v-flash"], multimodal: "native", docsUrl: "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5v-turbo", checkedAt: "2026-08-16", note: "优先 GLM-5V-Turbo 多模态模型；不再把纯文本旗舰 GLM-5.2 作为图像测试默认项", pricing: providerPricing("glm"), pricingDocsUrl: providerPricingDocs("glm") },
+  compatible: { label: "自定义兼容接口", baseUrl: "", models: [], multimodal: "unknown", note: "接口不提供统一能力元数据，必须通过文字与图片实测后才可使用" },
 };
 
 const fallbackSearchPresets: Record<string, SearchPreset> = {
@@ -314,7 +369,7 @@ const fallbackSearchPresets: Record<string, SearchPreset> = {
 };
 
 type ApiCredential = { apiKey: string; baseUrl: string; model: string };
-type ApiCredentialStore = { lastProvider?: string; credentials: Record<string, ApiCredential> };
+type ApiCredentialStore = { lastProvider?: string; lastModelByProvider: Record<string, string>; credentials: Record<string, ApiCredential> };
 type SavedEngineProfile = {
   version: 1;
   mode: EngineMode;
@@ -331,20 +386,73 @@ type SavedEngineProfile = {
 type SavedVerification = { version: 1; fingerprint: string; verifiedAt: string; detail: string };
 type SavedSearchProfile = { version: 1; provider: string; url: string; hadApiKey: boolean; savedAt: string };
 const API_CREDENTIAL_STORE = "precision-subtitle-studio.api-credentials.v1";
+const MODEL_CATALOG_STORE = "precision-subtitle-studio.model-catalogs.v2";
 const ENGINE_PROFILE_STORE = "precision-subtitle-studio.engine-profile.v1";
 const ENGINE_VERIFICATION_STORE = "precision-subtitle-studio.engine-verification.v1";
 const SEARCH_PROFILE_STORE = "precision-subtitle-studio.search-profile.v1";
 const SEARCH_VERIFICATION_STORE = "precision-subtitle-studio.search-verification.v1";
 const ACTIVE_JOB_STORE = "precision-subtitle-studio.active-job.v1";
+const LAST_JOB_STORE = "precision-subtitle-studio.last-job.v1";
 const TRANSCRIPTION_ENVIRONMENT_STORE = "precision-subtitle-studio.transcription-environment.v1";
 const DEFAULT_ENGINE_TEST_MESSAGE = "你好，请用一句话说明你已经连接成功，并告诉我当前模型名称";
 
 function readCredentialStore(storage: Storage): ApiCredentialStore {
   try {
     const parsed = JSON.parse(storage.getItem(API_CREDENTIAL_STORE) || "{}");
-    return { lastProvider: typeof parsed.lastProvider === "string" ? parsed.lastProvider : undefined, credentials: parsed.credentials && typeof parsed.credentials === "object" ? parsed.credentials : {} };
+    return {
+      lastProvider: typeof parsed.lastProvider === "string" ? parsed.lastProvider : undefined,
+      lastModelByProvider: parsed.lastModelByProvider && typeof parsed.lastModelByProvider === "object" ? parsed.lastModelByProvider : {},
+      credentials: parsed.credentials && typeof parsed.credentials === "object" ? parsed.credentials : {},
+    };
   } catch {
-    return { credentials: {} };
+    return { lastModelByProvider: {}, credentials: {} };
+  }
+}
+
+function apiCredentialKey(provider: string, model: string) {
+  return `${provider}::${model.trim()}`;
+}
+
+function credentialForModel(store: ApiCredentialStore, provider: string, model: string) {
+  const exact = store.credentials[apiCredentialKey(provider, model)];
+  if (exact) return exact;
+  const legacy = store.credentials[provider];
+  return legacy?.model === model ? legacy : undefined;
+}
+
+function preferredStoredModel(store: ApiCredentialStore, provider: string) {
+  return store.lastModelByProvider[provider] || store.credentials[provider]?.model || "";
+}
+
+function preferredApiModel(provider: string, value: string | undefined, preset: ApiPreset) {
+  if (provider === "openai" && value === "gpt-5.6-sol") return "gpt-5.6";
+  if (provider === "xai" && (value === "grok-4.5" || value === "grok-latest" || /^grok-4\.20-.+/i.test(value || ""))) return "grok-4.6";
+  if (provider === "mimo" && value === "mimo-v2.5-pro") return "mimo-v2.5";
+  if (provider === "glm" && value === "glm-5.2") return "glm-5v-turbo";
+  return value || preset.models[0] || "";
+}
+
+function modelCatalogKey(provider: string, baseUrl: string, apiKey: string) {
+  return `${provider}|${baseUrl.trim().replace(/\/$/, "")}|${credentialSignature(apiKey)}`;
+}
+
+function readModelCatalog(storage: Storage, provider: string, baseUrl: string, apiKey: string): ModelCatalogCacheEntry | null {
+  try {
+    const store = JSON.parse(storage.getItem(MODEL_CATALOG_STORE) || "{}") as Record<string, ModelCatalogCacheEntry>;
+    const entry = store[modelCatalogKey(provider, baseUrl, apiKey)];
+    return entry?.version === 2 && Array.isArray(entry.recommendedModels) && Array.isArray(entry.allModels) ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeModelCatalog(storage: Storage, provider: string, baseUrl: string, apiKey: string, entry: ModelCatalogCacheEntry) {
+  try {
+    const store = JSON.parse(storage.getItem(MODEL_CATALOG_STORE) || "{}") as Record<string, ModelCatalogCacheEntry>;
+    store[modelCatalogKey(provider, baseUrl, apiKey)] = entry;
+    storage.setItem(MODEL_CATALOG_STORE, JSON.stringify(store));
+  } catch {
+    // A storage restriction should not invalidate a successfully fetched list.
   }
 }
 
@@ -353,9 +461,10 @@ function initialApiCredential() {
   const temporary = readCredentialStore(window.sessionStorage);
   const persistent = readCredentialStore(window.localStorage);
   const provider = temporary.lastProvider || persistent.lastProvider || "openai";
-  const restored = temporary.credentials[provider] || persistent.credentials[provider];
   const preset = fallbackApiPresets[provider] || fallbackApiPresets.compatible;
-  return { provider, apiKey: restored?.apiKey || "", baseUrl: restored?.baseUrl || preset.baseUrl, model: restored?.model || preset.models[0] || "", remembered: Boolean(persistent.credentials[provider]?.apiKey) };
+  const model = preferredApiModel(provider, preferredStoredModel(temporary, provider) || preferredStoredModel(persistent, provider), preset);
+  const restored = credentialForModel(temporary, provider, model) || credentialForModel(persistent, provider, model);
+  return { provider, apiKey: restored?.apiKey || "", baseUrl: restored?.baseUrl || preset.baseUrl, model, remembered: Boolean(credentialForModel(persistent, provider, model)?.apiKey) };
 }
 
 function engineProfileFingerprint(value: Pick<SavedEngineProfile, "mode" | "provider" | "model" | "baseUrl" | "cli" | "gpuModel" | "reasoning" | "proxyEnabled" | "proxyUrl">) {
@@ -479,11 +588,11 @@ const phaseDefinitions = [
 ] as const;
 
 const initialRoles: Role[] = [
-  { id: "tomori", name: "高松灯", color: "#77BBDD" },
-  { id: "anon", name: "千早爱音", color: "#FF8899" },
-  { id: "rana", name: "要乐奈", color: "#77DD77" },
-  { id: "soyo", name: "长崎爽世", color: "#FFDD88" },
-  { id: "taki", name: "椎名立希", color: "#7777AA" },
+  { id: "tomori", name: "高松灯", characterName: "高松灯", performerName: "羊宫妃那", speakingAs: "character", color: "#77BBDD" },
+  { id: "anon", name: "千早爱音", characterName: "千早爱音", performerName: "立石凛", speakingAs: "character", color: "#FF8899" },
+  { id: "rana", name: "要乐奈", characterName: "要乐奈", performerName: "青木阳菜", speakingAs: "character", color: "#77DD77" },
+  { id: "soyo", name: "长崎爽世", characterName: "长崎爽世", performerName: "小日向美香", speakingAs: "character", color: "#FFDD88" },
+  { id: "taki", name: "椎名立希", characterName: "椎名立希", performerName: "林鼓子", speakingAs: "character", color: "#7777AA" },
 ];
 
 const initialCues: Cue[] = [
@@ -605,6 +714,39 @@ function normalizeReviewCue(cue: Cue) {
     // The editor should always expose real editable line breaks to users.
     translation: String(cue.translation || "").replace(/\\N|\\n/g, "\n"),
   };
+}
+
+function normalizeReviewRole(role: Role, index = 0): Role {
+  const characterName = String(role.characterName || "").trim();
+  const performerName = String(role.performerName || "").trim();
+  const rawName = String(role.name || "").trim();
+  const speakingAs: SpeakerIdentity = role.speakingAs === "character" || role.speakingAs === "performer"
+    ? role.speakingAs
+    : rawName && performerName && rawName === performerName
+      ? "performer"
+      : rawName && characterName && rawName === characterName
+        ? "character"
+        : "unknown";
+  const name = speakingAs === "performer"
+    ? performerName || rawName || characterName
+    : speakingAs === "character"
+      ? characterName || rawName || performerName
+      : rawName || characterName || performerName || `未确认人物 ${index + 1}`;
+  return {
+    ...role,
+    id: String(role.id || `speaker-${index + 1}`),
+    name,
+    color: /^#[0-9a-f]{6}$/i.test(String(role.color || "")) ? role.color : "#A78BFA",
+    characterName: characterName || undefined,
+    performerName: performerName || undefined,
+    speakingAs,
+  };
+}
+
+function speakerIdentityLabel(value?: SpeakerIdentity) {
+  if (value === "character") return "角色发言";
+  if (value === "performer") return "声优本人";
+  return "身份待确认";
 }
 
 function statusLabel(status: PhaseStatus) {
@@ -795,8 +937,13 @@ export function SubtitleStudio() {
   const [engineProfileMessage, setEngineProfileMessage] = useState("");
   const [easyModeActive, setEasyModeActive] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [accountModels, setAccountModels] = useState<string[]>([]);
+  const [discoveredModelPricing, setDiscoveredModelPricing] = useState<Record<string, ApiPriceRule>>({});
   const [modelSyncBusy, setModelSyncBusy] = useState(false);
   const [modelSyncMessage, setModelSyncMessage] = useState("");
+  const [modelCatalogWarning, setModelCatalogWarning] = useState("");
+  const [showAllAccountModels, setShowAllAccountModels] = useState(false);
+  const [modelSelectionTouched, setModelSelectionTouched] = useState(false);
   const [researchPreview, setResearchPreview] = useState("");
   const [researchBusy, setResearchBusy] = useState(false);
   const [researchStage, setResearchStage] = useState("等待开始检索");
@@ -809,8 +956,6 @@ export function SubtitleStudio() {
   const [harnessOpen, setHarnessOpen] = useState(false);
   const [harnessText, setHarnessText] = useState("");
   const [harnessOriginal, setHarnessOriginal] = useState("");
-  const [harnessConfirmedText, setHarnessConfirmedText] = useState("");
-  const [harnessConfirmed, setHarnessConfirmed] = useState(false);
   const [deliveryConstraints, setDeliveryConstraints] = useState(DEFAULT_DELIVERY_CONSTRAINTS);
   const [confirmedDeliveryConstraints, setConfirmedDeliveryConstraints] = useState(DEFAULT_DELIVERY_CONSTRAINTS);
   const [ambiguityReviewMode, setAmbiguityReviewMode] = useState<AmbiguityReviewMode>("pragmatic");
@@ -834,9 +979,19 @@ export function SubtitleStudio() {
   const [phaseDetails, setPhaseDetails] = useState<Record<string, PhaseDetail>>({});
   const [selectedPhaseId, setSelectedPhaseId] = useState<string>("");
   const [manifestLimitations, setManifestLimitations] = useState<string[]>([]);
+  const [manifestNotices, setManifestNotices] = useState<string[]>([]);
   const [jobDiagnostics, setJobDiagnostics] = useState<{ stderr: string[]; logPath: string } | null>(null);
   const [jobResources, setJobResources] = useState<JobResources | null>(null);
   const [resumeBusy, setResumeBusy] = useState(false);
+  const [terminateBusy, setTerminateBusy] = useState(false);
+  const [terminateConfirmOpen, setTerminateConfirmOpen] = useState(false);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyJobs, setHistoryJobs] = useState<HistoricalJob[]>([]);
+  const [historyJobBusy, setHistoryJobBusy] = useState(false);
+  const [historyJobError, setHistoryJobError] = useState("");
+  const [externalConsentChecked, setExternalConsentChecked] = useState(false);
+  const [activeJobConsentFingerprint, setActiveJobConsentFingerprint] = useState("");
+  const [jobRunStatus, setJobRunStatus] = useState<JobRunStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [jobId, setJobId] = useState("");
   const [runMessage, setRunMessage] = useState("准备就绪");
@@ -880,11 +1035,13 @@ export function SubtitleStudio() {
   const lastReviewEditRef = useRef<{ key: string; at: number } | null>(null);
   const reviewHistoryActionRef = useRef({ undo: () => undefined, redo: () => undefined });
   const workflowStepRefs = useRef<Record<PrepareStage, HTMLElement | null>>({ engine: null, source: null, research: null, harness: null });
+  const completedJobHydratedRef = useRef("");
+  const completedJobAutoOpenedRef = useRef("");
 
   const sourceKind = detectSourceKind(source);
   const selectedCue = cues.find((cue) => cue.id === selectedCueId) ?? cues[0];
-  const currentCue = cues.find((cue) => currentTime >= cue.start && currentTime <= cue.end) ?? selectedCue;
-  const currentRole = roles.find((role) => role.id === currentCue?.speakerId) ?? roles[0];
+  const visibleCue = cues.find((cue) => currentTime >= cue.start && currentTime < cue.end);
+  const visibleRole = visibleCue ? roles.find((role) => role.id === visibleCue.speakerId) : undefined;
   const timelineDuration = Math.max(35, ...cues.map((cue) => cue.end));
   const timelinePixelsPerSecond = timelineZoom * 0.72;
   const timelineCanvasWidth = Math.max(720, Math.ceil(timelineDuration * timelinePixelsPerSecond));
@@ -905,10 +1062,20 @@ export function SubtitleStudio() {
     : engineMode === "gpu"
       ? `Ollama / ${gpuModel || "未选模型"}`
       : cliOptions.find((option) => option.id === cli)?.label || cli;
+  const currentExternalProcessingPlan = externalProcessingPlan({
+    engineMode,
+    provider,
+    model,
+    baseUrl,
+    transcriptionMode,
+    transcriptionProvider,
+    transcriptionModel,
+    transcriptionBaseUrl,
+  });
   const videoReady = Boolean(source.trim() && outputPath.trim() && formats.length);
   const transcriptionReadyForCamera = Boolean(transcriptionEnvironment?.ready);
   const researchReady = Boolean(researchPreview.trim());
-  const harnessVerified = harnessConfirmed && harnessConfirmedText === harnessText && confirmedDeliveryConstraints === deliveryConstraints;
+  const harnessReady = Boolean(harnessText.trim());
   const currentPrepareStage: PrepareStage = !engineVerified
     ? "engine"
     : !videoReady || !transcriptionReadyForCamera
@@ -917,18 +1084,22 @@ export function SubtitleStudio() {
         ? "research"
         : "harness";
   const displayedTokenUsage = addTokenUsage(sessionTokenUsage, jobTokenUsage);
-  const activePriceRule = engineMode === "api" ? apiPresets[provider]?.pricing?.[model] : undefined;
+  const activePriceRule = engineMode === "api" ? discoveredModelPricing[model] || apiPresets[provider]?.pricing?.[model] : undefined;
   const estimatedTokenCost = estimateTokenCost(displayedTokenUsage, activePriceRule);
   const estimatedTokenCostLabel = engineMode === "api"
     ? activePriceRule
       ? formatEstimatedCost(estimatedTokenCost, activePriceRule.currency)
       : "暂不可估算"
     : "本地执行";
+  const tokenUsageDetails = displayedTokenUsage.available
+    ? `输入 ${formatTokenCount(displayedTokenUsage.input, true)} Token · 输出 ${formatTokenCount(displayedTokenUsage.output, true)} Token · 缓存命中 ${displayedTokenUsage.cacheAvailable ? formatTokenCount(displayedTokenUsage.cachedInput, true) : "未提供"} Token · 合计 ${formatTokenCount(displayedTokenUsage.total, true)} Token · 估算费用 ${estimatedTokenCostLabel} · ${activeEngineLabel}`
+    : `本次尚无 Token 明细 · ${activeEngineLabel}`;
   const harnessLines = harnessText ? harnessText.split("\n").length : 0;
   const harnessChanged = harnessText !== harnessOriginal;
   const canTestEngine = bridgeStatus === "online"
     && (engineMode === "api" ? Boolean(apiKey.trim() && model.trim() && (baseUrl.trim() || apiPresets[provider]?.baseUrl)) : engineMode === "gpu" ? Boolean(gpuModel.trim() && capabilities.ollama?.available) : Boolean(capabilities[cli]?.available));
-  const availableModelOptions = [...new Set([model, ...discoveredModels, ...(apiPresets[provider]?.models ?? [])].filter(Boolean))];
+  const recommendedModelOptions = discoveredModels.length ? discoveredModels : apiPresets[provider]?.models ?? [];
+  const availableModelOptions = [...new Set([model, ...discoveredModels, ...(apiPresets[provider]?.models ?? []), ...(showAllAccountModels ? accountModels : [])].filter(Boolean))];
   const transcriptionPreset = transcriptionPresets[transcriptionProvider];
   const transcriptionModelOptions = transcriptionPreset.models as readonly string[];
   const transcriptionQualityPreset = transcriptionQualityPresets[transcriptionQuality];
@@ -979,9 +1150,17 @@ export function SubtitleStudio() {
         if (saved.source) setSource((current) => current || saved.source || "");
         setWorkspace("running");
         setRunMessage("正在恢复上次任务状态…");
+        return;
+      }
+      const last = JSON.parse(window.localStorage.getItem(LAST_JOB_STORE) || "null") as { id?: string; source?: string; savedAt?: string } | null;
+      if (last?.id && /^[a-f0-9-]{36}$/i.test(last.id)) {
+        setJobId(last.id);
+        if (last.source) setSource((current) => current || last.source || "");
+        setRunMessage("可查看最近一次翻译记录");
       }
     } catch {
       window.localStorage.removeItem(ACTIVE_JOB_STORE);
+      window.localStorage.removeItem(LAST_JOB_STORE);
     }
   }, []);
 
@@ -996,11 +1175,12 @@ export function SubtitleStudio() {
       if (saved?.version === 1 && ["api", "cli", "gpu"].includes(saved.mode)) {
         const temporary = readCredentialStore(window.sessionStorage);
         const persistent = readCredentialStore(window.localStorage);
-        const credential = temporary.credentials[saved.provider] || persistent.credentials[saved.provider];
+        const credential = credentialForModel(temporary, saved.provider, saved.model) || credentialForModel(persistent, saved.provider, saved.model);
         setEngineMode(saved.mode);
         setStudioMode(saved.mode === "api" ? "easy" : "advanced");
         setProvider(saved.provider || "openai");
-        setModel(saved.model || fallbackApiPresets[saved.provider]?.models?.[0] || "");
+        const restoredPreset = fallbackApiPresets[saved.provider] || fallbackApiPresets.compatible;
+        setModel(preferredApiModel(saved.provider, saved.model, restoredPreset));
         setBaseUrl(saved.baseUrl || fallbackApiPresets[saved.provider]?.baseUrl || "");
         setCli(saved.cli || "codex");
         setGpuModel(saved.gpuModel || "deepseek-r1:14b");
@@ -1009,7 +1189,7 @@ export function SubtitleStudio() {
         setProxyEnabled(saved.proxyEnabled ?? Boolean(saved.proxyUrl));
         setProxyUrl(saved.proxyUrl || "");
         setApiKey(credential?.apiKey || "");
-        setRememberApiKey(Boolean(persistent.credentials[saved.provider]?.apiKey));
+        setRememberApiKey(Boolean(credentialForModel(persistent, saved.provider, saved.model)?.apiKey));
         setSavedEngineFingerprint(engineProfileFingerprint(saved));
         setEngineProfileSavedAt(saved.savedAt || "");
         setEngineProfileMessage("已自动恢复上次保存的模型设置");
@@ -1066,18 +1246,45 @@ export function SubtitleStudio() {
   useEffect(() => {
     const credential = { apiKey, baseUrl, model };
     if (!engineProfileLoaded) return;
+    const key = apiCredentialKey(provider, model);
     const temporary = readCredentialStore(window.sessionStorage);
     temporary.lastProvider = provider;
-    if (apiKey.trim()) temporary.credentials[provider] = credential;
-    else delete temporary.credentials[provider];
+    temporary.lastModelByProvider[provider] = model;
+    if (apiKey.trim()) temporary.credentials[key] = credential;
+    else delete temporary.credentials[key];
     window.sessionStorage.setItem(API_CREDENTIAL_STORE, JSON.stringify(temporary));
 
     const persistent = readCredentialStore(window.localStorage);
     persistent.lastProvider = provider;
-    if (rememberApiKey && apiKey.trim()) persistent.credentials[provider] = credential;
-    else delete persistent.credentials[provider];
+    persistent.lastModelByProvider[provider] = model;
+    if (rememberApiKey && apiKey.trim()) persistent.credentials[key] = credential;
+    else delete persistent.credentials[key];
     window.localStorage.setItem(API_CREDENTIAL_STORE, JSON.stringify(persistent));
   }, [apiKey, baseUrl, engineProfileLoaded, model, provider, rememberApiKey]);
+
+  useEffect(() => {
+    if (!engineProfileLoaded || engineMode !== "api" || !apiKey.trim() || !baseUrl.trim()) {
+      setDiscoveredModels([]);
+      setAccountModels([]);
+      setDiscoveredModelPricing({});
+      setModelCatalogWarning("");
+      return;
+    }
+    const cached = readModelCatalog(window.localStorage, provider, baseUrl, apiKey);
+    if (!cached) {
+      setDiscoveredModels([]);
+      setAccountModels([]);
+      setDiscoveredModelPricing({});
+      setModelCatalogWarning("");
+      return;
+    }
+    setDiscoveredModels(cached.recommendedModels);
+    setAccountModels(cached.allModels);
+    setDiscoveredModelPricing(cached.pricing || {});
+    setModelCatalogWarning(cached.warning || "");
+    if (!modelSelectionTouched && cached.recommendedModels[0]) setModel(cached.recommendedModels[0]);
+    setModelSyncMessage(`已载入本机缓存 · 推荐 ${cached.recommendedModels.length} 个多模态模型 · 账户共 ${cached.allModels.length} 个`);
+  }, [apiKey, baseUrl, engineMode, engineProfileLoaded, modelSelectionTouched, provider]);
 
   useEffect(() => {
     if (bridgeStatus !== "online") return;
@@ -1094,9 +1301,11 @@ export function SubtitleStudio() {
   useEffect(() => {
     if (!easyModeActive || !harnessOriginal) return;
     setHarnessText(harnessOriginal);
-    setHarnessConfirmedText(harnessOriginal);
-    setHarnessConfirmed(true);
   }, [easyModeActive, harnessOriginal]);
+
+  useEffect(() => {
+    setExternalConsentChecked(false);
+  }, [currentExternalProcessingPlan.fingerprint]);
 
   useEffect(() => {
     if (workspace === "prepare") setCameraFocus(currentPrepareStage);
@@ -1131,27 +1340,37 @@ export function SubtitleStudio() {
         if (!active) return;
         failures = 0;
         setJobConnectionFailures(0);
+        if (["running", "blocked", "failed", "cancelled", "completed"].includes(data.status)) setJobRunStatus(data.status as JobRunStatus);
         setProgress(data.progress ?? 0);
         setRunMessage(data.message ?? "处理中");
         if (data.phases) setPhaseStates(data.phases);
         if (data.phaseDetails) setPhaseDetails(data.phaseDetails);
         if (["fast", "pragmatic", "strict"].includes(data.reviewPolicy?.ambiguities)) setAmbiguityReviewMode(data.reviewPolicy.ambiguities as AmbiguityReviewMode);
+        setActiveJobConsentFingerprint(data.externalProcessingConsent?.granted ? String(data.externalProcessingConsent.fingerprint || "") : "");
         if (data.resources) setJobResources(data.resources);
         setJobTokenUsage(normalizedTokenUsage(data.tokenUsage));
-        if (Array.isArray(data.manifest?.limitations)) setManifestLimitations(data.manifest.limitations.map(String));
+        setManifestLimitations(Array.isArray(data.manifest?.limitations) ? data.manifest.limitations.map(String) : []);
+        setManifestNotices(Array.isArray(data.manifest?.notices) ? data.manifest.notices.map(String) : []);
         setJobDiagnostics(data.diagnostics || null);
         if (Array.isArray(data.trace)) setTrace(data.trace);
         if (data.status === "completed") {
           setProgress(100);
-          resetReviewHistory();
-          if (Array.isArray(data.review?.roles) && data.review.roles.length) setRoles(data.review.roles);
-          if (Array.isArray(data.review?.cues) && data.review.cues.length) {
-            setCues(data.review.cues.map((cue: Cue) => normalizeReviewCue(cue)));
-            setSelectedCueId(data.review.cues[0].id);
+          const hasReviewCues = Array.isArray(data.review?.cues) && data.review.cues.length > 0;
+          if (completedJobHydratedRef.current !== jobId) {
+            resetReviewHistory();
+            if (Array.isArray(data.review?.roles) && data.review.roles.length) setRoles(data.review.roles.map((role: Role, index: number) => normalizeReviewRole(role, index)));
+            if (hasReviewCues) {
+              setCues(data.review.cues.map((cue: Cue) => normalizeReviewCue(cue)));
+              setSelectedCueId(data.review.cues[0].id);
+            }
+            if (data.mediaUrl) setPreviewUrl(`${BRIDGE_URL}${data.mediaUrl}`);
+            completedJobHydratedRef.current = jobId;
           }
-          if (data.mediaUrl) setPreviewUrl(`${BRIDGE_URL}${data.mediaUrl}`);
-          if (Array.isArray(data.review?.cues) && data.review.cues.length) setWorkspace("review");
-          else setRunError("Agent 已结束，但没有生成可精修的真实字幕数据；不会载入示例字幕。请查看执行轨迹定位中断阶段。 ");
+          window.localStorage.setItem(LAST_JOB_STORE, JSON.stringify({ id: jobId, source, savedAt: new Date().toISOString() }));
+          if (hasReviewCues && completedJobAutoOpenedRef.current !== jobId) {
+            completedJobAutoOpenedRef.current = jobId;
+            setWorkspace("review");
+          } else if (!hasReviewCues) setRunError("Agent 已结束，但没有生成可精修的真实字幕数据；不会载入示例字幕。请查看执行轨迹定位中断阶段。 ");
           window.localStorage.removeItem(ACTIVE_JOB_STORE);
           return;
         }
@@ -1162,6 +1381,13 @@ export function SubtitleStudio() {
         }
         if (data.status === "failed") {
           setRunError(data.error ?? "任务执行失败，请查看本地日志。 ");
+          return;
+        }
+        if (data.status === "cancelled") {
+          setRunMessage(data.message ?? "任务已终止，已有成果已保留，可从断点继续");
+          setRunError("");
+          setJobBlocker(null);
+          setTerminateConfirmOpen(false);
           return;
         }
         timer = window.setTimeout(pollJob, 1500);
@@ -1612,8 +1838,6 @@ export function SubtitleStudio() {
     const builtInHarness = harnessOriginal || harnessText;
     if (builtInHarness) {
       setHarnessText(builtInHarness);
-      setHarnessConfirmedText(builtInHarness);
-      setHarnessConfirmed(true);
     }
 
     setEasyModeActive(true);
@@ -1626,21 +1850,40 @@ export function SubtitleStudio() {
     const preset = apiPresets[value] ?? fallbackApiPresets[value];
     const temporary = readCredentialStore(window.sessionStorage);
     const persistent = readCredentialStore(window.localStorage);
-    const stored = temporary.credentials[value] || persistent.credentials[value];
+    const nextModel = preferredApiModel(value, preferredStoredModel(temporary, value) || preferredStoredModel(persistent, value), preset || fallbackApiPresets.compatible);
+    const stored = credentialForModel(temporary, value, nextModel) || credentialForModel(persistent, value, nextModel);
     setProvider(value);
     setApiKey(stored?.apiKey || "");
     setBaseUrl(stored?.baseUrl || preset?.baseUrl || "");
-    setModel(stored?.model || preset?.models?.[0] || "");
-    setRememberApiKey(Boolean(persistent.credentials[value]?.apiKey));
+    setModel(nextModel);
+    setRememberApiKey(Boolean(credentialForModel(persistent, value, nextModel)?.apiKey));
     setDiscoveredModels([]);
+    setAccountModels([]);
+    setDiscoveredModelPricing({});
+    setModelCatalogWarning("");
+    setShowAllAccountModels(false);
+    setModelSelectionTouched(false);
     setModelSyncMessage("");
+    invalidateEngineTest();
+  }
+
+  function chooseApiModel(value: string) {
+    const temporary = readCredentialStore(window.sessionStorage);
+    const persistent = readCredentialStore(window.localStorage);
+    const stored = credentialForModel(temporary, provider, value) || credentialForModel(persistent, provider, value);
+    setModel(value);
+    setApiKey(stored?.apiKey || "");
+    setBaseUrl(stored?.baseUrl || apiPresets[provider]?.baseUrl || fallbackApiPresets[provider]?.baseUrl || "");
+    setRememberApiKey(Boolean(credentialForModel(persistent, provider, value)?.apiKey));
+    setModelSelectionTouched(true);
     invalidateEngineTest();
   }
 
   function clearStoredApiKey() {
     for (const storage of [window.sessionStorage, window.localStorage]) {
       const stored = readCredentialStore(storage);
-      delete stored.credentials[provider];
+      delete stored.credentials[apiCredentialKey(provider, model)];
+      if (stored.credentials[provider]?.model === model) delete stored.credentials[provider];
       storage.setItem(API_CREDENTIAL_STORE, JSON.stringify(stored));
     }
     setApiKey("");
@@ -1653,7 +1896,8 @@ export function SubtitleStudio() {
     setRememberApiKey(enabled);
     if (!enabled) {
       const persistent = readCredentialStore(window.localStorage);
-      delete persistent.credentials[provider];
+      delete persistent.credentials[apiCredentialKey(provider, model)];
+      if (persistent.credentials[provider]?.model === model) delete persistent.credentials[provider];
       window.localStorage.setItem(API_CREDENTIAL_STORE, JSON.stringify(persistent));
     }
   }
@@ -1695,7 +1939,7 @@ export function SubtitleStudio() {
   async function syncProviderModels() {
     if (!apiKey.trim()) return;
     setModelSyncBusy(true);
-    setModelSyncMessage("");
+    setModelSyncMessage("正在检查当前账户的模型更新…");
     try {
       const response = await fetch(`${BRIDGE_URL}/api/engine/models`, {
         method: "POST",
@@ -1704,13 +1948,28 @@ export function SubtitleStudio() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "无法同步模型列表");
-      const models = Array.isArray(data.models) ? data.models.map(String) : [];
+      const models = Array.isArray(data.recommendedModels) ? data.recommendedModels.map(String) : Array.isArray(data.models) ? data.models.map(String) : [];
+      const allModels = Array.isArray(data.allModels) ? data.allModels.map(String) : models;
+      const pricing = data.pricing && typeof data.pricing === "object" ? data.pricing as Record<string, ApiPriceRule> : {};
+      const fetchedAt = typeof data.fetchedAt === "string" ? data.fetchedAt : new Date().toISOString();
+      const filteredOut = Number(data.filteredOut || 0);
+      const warning = typeof data.warning === "string" ? data.warning : "";
       setDiscoveredModels(models);
-      if (models.length && !models.includes(model)) setModel(models[0]);
-      setModelSyncMessage(`已从当前账户同步 ${models.length} 个模型`);
+      setAccountModels(allModels);
+      setDiscoveredModelPricing(pricing);
+      setModelCatalogWarning(warning);
+      writeModelCatalog(window.localStorage, provider, baseUrl, apiKey, { version: 2, recommendedModels: models, allModels, pricing, source: String(data.source || ""), fetchedAt, warning });
+      setModel((current) => {
+        if (!models.length || modelSelectionTouched) return current;
+        return models.includes(current) ? current : models[0];
+      });
+      setModelSyncMessage(`实时目录 · 推荐 ${models.length} 个多模态模型 · 账户共 ${allModels.length} 个${filteredOut > 0 ? ` · 已排除 ${filteredOut} 个语音/生成类模型` : ""} · ${new Date(fetchedAt).toLocaleString("zh-CN")}`);
       invalidateEngineTest();
     } catch (error) {
-      setModelSyncMessage(error instanceof Error ? error.message : "无法同步模型列表");
+      const cached = readModelCatalog(window.localStorage, provider, baseUrl, apiKey);
+      setModelSyncMessage(cached
+        ? `实时刷新失败，继续使用 ${cached.recommendedModels.length} 个本机推荐模型 · ${error instanceof Error ? error.message : "连接失败"}`
+        : error instanceof Error ? error.message : "无法同步模型列表");
     } finally {
       setModelSyncBusy(false);
     }
@@ -1964,7 +2223,7 @@ export function SubtitleStudio() {
 
   function addReviewRole() {
     rememberReviewState("role:add");
-    setRoles((current) => [...current, { id: `speaker-${Date.now()}`, name: "新角色", color: "#A78BFA" }]);
+    setRoles((current) => [...current, { id: `speaker-${Date.now()}`, name: "未确认人物", characterName: "", performerName: "", speakingAs: "unknown", color: "#A78BFA" }]);
     setSaved(false);
   }
 
@@ -2143,11 +2402,25 @@ export function SubtitleStudio() {
     if (timelineScrollerRef.current) timelineScrollerRef.current.scrollLeft = 0;
   }
 
-  async function startTranslation() {
+  function currentExternalProcessingConsent(): ExternalProcessingConsent {
+    return {
+      version: 1,
+      granted: true,
+      grantedAt: new Date().toISOString(),
+      currentTaskOnly: true,
+      fingerprint: currentExternalProcessingPlan.fingerprint,
+      services: currentExternalProcessingPlan.services,
+      dataTypes: currentExternalProcessingPlan.dataTypes,
+    };
+  }
+
+  async function startTranslation(externalProcessingConsent: ExternalProcessingConsent | null = null) {
     setRunError("");
     setJobBlocker(null);
     setJobConnectionFailures(0);
     setJobTokenUsage(emptyTokenUsage());
+    setJobRunStatus("idle");
+    setTerminateConfirmOpen(false);
     const issues: Array<{ stage: PrepareStage; message: string }> = [];
     if (!engineVerified) issues.push({ stage: "engine", message: "翻译模型尚未通过文字与图片测试" });
     if (!source.trim()) issues.push({ stage: "source", message: "未填写视频链接或本地路径" });
@@ -2160,13 +2433,14 @@ export function SubtitleStudio() {
     if (searchProvider !== "builtin" && !searchMcpUrl.trim()) issues.push({ stage: "research", message: "联网检索缺少 MCP 地址" });
     if (!searchPresets[searchProvider]?.keyOptional && !searchApiKey.trim()) issues.push({ stage: "research", message: "联网检索缺少 API Key" });
     if (!researchPreview.trim()) issues.push({ stage: "research", message: "尚未生成并检查预习结果文档" });
-    if (!harnessVerified) issues.push({ stage: "harness", message: "尚未确认 Precision harness" });
+    if (currentExternalProcessingPlan.required && !externalConsentChecked && !externalProcessingConsent) issues.push({ stage: "harness", message: "尚未勾选当前任务的外部模型处理授权" });
     if (bridgeStatus !== "online") issues.push({ stage: "engine", message: "本地服务未连接" });
     if (issues.length) {
       focusPrepareStage(issues[0].stage);
       setRunError(`开始前统一检查发现 ${issues.length} 项：${issues.map((item) => item.message).join("；")}。已带你到第一处需要处理的位置。`);
       return;
     }
+    const taskExternalProcessingConsent = externalProcessingConsent || (currentExternalProcessingPlan.required ? currentExternalProcessingConsent() : null);
     setWorkspace("running");
     setRunMessage("正在创建任务…");
     try {
@@ -2193,12 +2467,17 @@ export function SubtitleStudio() {
           deliveryConstraints,
           reviewPolicy: { version: 1, ambiguity: { mode: ambiguityReviewMode } },
           execution: { showTrace },
+          ...(taskExternalProcessingConsent ? { externalProcessingConsent: taskExternalProcessingConsent } : {}),
           subtitleStyle: { fontFamily, fontSize, fontWeight, outline, glow, shadow, maxLines: 2 },
         }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "任务创建失败");
+      completedJobHydratedRef.current = "";
+      completedJobAutoOpenedRef.current = "";
       setJobId(data.id);
+      setJobRunStatus("running");
+      setActiveJobConsentFingerprint(taskExternalProcessingConsent?.fingerprint || "");
       window.localStorage.setItem(ACTIVE_JOB_STORE, JSON.stringify({ id: data.id, source, savedAt: new Date().toISOString() }));
       setRunMessage("任务已交给本地 Agent");
     } catch (error) {
@@ -2207,20 +2486,31 @@ export function SubtitleStudio() {
     }
   }
 
-  async function resumeBlockedJob() {
+  async function resumeBlockedJob(externalProcessingConsent: ExternalProcessingConsent | null = null) {
     if (!jobId) return;
+    completedJobHydratedRef.current = "";
+    completedJobAutoOpenedRef.current = "";
+    if (currentExternalProcessingPlan.required && !externalProcessingConsent && activeJobConsentFingerprint !== currentExternalProcessingPlan.fingerprint) {
+      setWorkspace("prepare");
+      focusPrepareStage("harness");
+      setRunError("模型配置已经变化，请在第四步重新勾选外部模型处理授权后再继续。");
+      return;
+    }
     setResumeBusy(true);
     setRunError("");
     try {
-      if (!transcriptionEnvironment?.ready) throw new Error("请先检查并准备听写环境");
+      if (transcriptionEnvironment && !transcriptionEnvironment.ready) throw new Error("请先检查并准备听写环境");
       const response = await fetch(`${BRIDGE_URL}/api/jobs/${jobId}/resume`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ engine: enginePayload(), transcription: transcriptionPayload(), search: searchPayload(), reviewPolicy: { version: 1, ambiguity: { mode: ambiguityReviewMode } }, execution: { showTrace } }),
+        body: JSON.stringify({ engine: enginePayload(), transcription: transcriptionPayload(), search: searchPayload(), reviewPolicy: { version: 1, ambiguity: { mode: ambiguityReviewMode } }, execution: { showTrace }, ...(externalProcessingConsent ? { externalProcessingConsent } : {}) }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "无法继续任务");
       setJobBlocker(null);
+      setJobRunStatus("running");
+      if (externalProcessingConsent) setActiveJobConsentFingerprint(externalProcessingConsent.fingerprint);
+      setTerminateConfirmOpen(false);
       setPhaseStates((current) => ({ ...current, [data.resumeFrom]: "running" }));
       setRunMessage(`正在从“${phaseDefinitions.find(([id]) => id === data.resumeFrom)?.[1] || data.resumeFrom}”继续`);
       setWorkspace("running");
@@ -2229,6 +2519,64 @@ export function SubtitleStudio() {
       setRunError(error instanceof Error ? error.message : "无法继续任务");
     } finally {
       setResumeBusy(false);
+    }
+  }
+
+  async function showHistoryDialog() {
+    setHistoryDialogOpen(true);
+    setHistoryJobBusy(true);
+    setHistoryJobError("");
+    try {
+      const response = await fetch(`${BRIDGE_URL}/api/jobs`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "无法读取历史任务");
+      setHistoryJobs(Array.isArray(data.jobs) ? data.jobs : []);
+    } catch (error) {
+      setHistoryJobError(error instanceof Error ? error.message : "无法读取历史任务");
+    } finally {
+      setHistoryJobBusy(false);
+    }
+  }
+
+  async function openHistoricalJob(id: string) {
+    setHistoryJobBusy(true);
+    setHistoryJobError("");
+    try {
+      const response = await fetch(`${BRIDGE_URL}/api/jobs/${id}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "没有找到这个历史任务");
+      completedJobHydratedRef.current = "";
+      completedJobAutoOpenedRef.current = data.status === "completed" ? id : "";
+      setJobId(id);
+      setJobRunStatus(["running", "blocked", "failed", "cancelled", "completed"].includes(data.status) ? data.status as JobRunStatus : "idle");
+      setRunMessage(data.message || "正在载入历史任务记录");
+      window.localStorage.setItem(LAST_JOB_STORE, JSON.stringify({ id, source, savedAt: new Date().toISOString() }));
+      setHistoryDialogOpen(false);
+      setWorkspace("running");
+    } catch (error) {
+      setHistoryJobError(error instanceof Error ? error.message : "无法打开历史任务");
+    } finally {
+      setHistoryJobBusy(false);
+    }
+  }
+
+  async function terminateCurrentJob() {
+    if (!jobId || terminateBusy) return;
+    setTerminateBusy(true);
+    setRunError("");
+    try {
+      const response = await fetch(`${BRIDGE_URL}/api/jobs/${jobId}/cancel`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "无法终止任务");
+      if (["running", "blocked", "failed", "cancelled", "completed"].includes(data.status)) setJobRunStatus(data.status as JobRunStatus);
+      setRunMessage(data.message || "任务已终止，已有成果已保留，可从断点继续");
+      if (data.status === "cancelled") setJobBlocker(null);
+      setTerminateConfirmOpen(false);
+      setJobPollRevision((value) => value + 1);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : "无法终止任务");
+    } finally {
+      setTerminateBusy(false);
     }
   }
 
@@ -2278,7 +2626,7 @@ export function SubtitleStudio() {
         },
         search: { provider: searchProvider, url: projectSafeUrl(searchMcpUrl) },
         research: { keywords, sites: selectedSites, customSites, preview: researchPreview, knowledgeIds, title: knowledgeTitle },
-        harness: { text: harnessText, confirmed: harnessConfirmed, deliveryConstraints, ambiguityReviewMode },
+        harness: { text: harnessText, confirmed: true, deliveryConstraints, ambiguityReviewMode },
         execution: { showTrace },
       },
       review: {
@@ -2337,9 +2685,9 @@ export function SubtitleStudio() {
       const importedAmbiguityMode = ["fast", "pragmatic", "strict"].includes(prepare.harness.ambiguityReviewMode) ? prepare.harness.ambiguityReviewMode : "pragmatic";
       const temporaryCredentials = readCredentialStore(window.sessionStorage);
       const persistentCredentials = readCredentialStore(window.localStorage);
-      const localCredential = temporaryCredentials.credentials[prepare.engine.provider] || persistentCredentials.credentials[prepare.engine.provider];
+      const localCredential = credentialForModel(temporaryCredentials, prepare.engine.provider, prepare.engine.model) || credentialForModel(persistentCredentials, prepare.engine.provider, prepare.engine.model);
       const clamp = (value: number, min: number, max: number, fallback: number) => Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
-      const importedRoles = review.roles.filter((item) => item && typeof item.id === "string" && typeof item.name === "string" && /^#[0-9a-f]{6}$/i.test(item.color));
+      const importedRoles = review.roles.filter((item) => item && typeof item.id === "string" && typeof item.name === "string" && /^#[0-9a-f]{6}$/i.test(item.color)).map((item, index) => normalizeReviewRole(item, index));
       const importedCues = review.cues.filter((item) => item && Number.isFinite(item.id) && Number.isFinite(item.start) && Number.isFinite(item.end)).map((item) => normalizeReviewCue(item));
 
       if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
@@ -2360,7 +2708,7 @@ export function SubtitleStudio() {
       setProxyEnabled(Boolean(prepare.engine.proxyEnabled));
       setProxyUrl(String(prepare.engine.proxyUrl || ""));
       setApiKey(localCredential?.apiKey || "");
-      setRememberApiKey(Boolean(persistentCredentials.credentials[prepare.engine.provider]?.apiKey));
+      setRememberApiKey(Boolean(credentialForModel(persistentCredentials, prepare.engine.provider, prepare.engine.model)?.apiKey));
       setVerifiedEngine("");
       setEngineVerificationRestored(false);
       setTranscriptionMode(prepare.transcription.mode === "api" ? "api" : "local");
@@ -2386,10 +2734,8 @@ export function SubtitleStudio() {
       setKnowledgeIds(prepare.research.knowledgeIds.map(String).filter(Boolean));
       setKnowledgeTitle(String(prepare.research.title || ""));
       setHarnessText(String(prepare.harness.text || harnessOriginal));
-      setHarnessConfirmed(Boolean(prepare.harness.confirmed && prepare.harness.text));
-      setHarnessConfirmedText(prepare.harness.confirmed ? String(prepare.harness.text || "") : "");
       setDeliveryConstraints(String(prepare.harness.deliveryConstraints || DEFAULT_DELIVERY_CONSTRAINTS));
-      setConfirmedDeliveryConstraints(prepare.harness.confirmed ? String(prepare.harness.deliveryConstraints || DEFAULT_DELIVERY_CONSTRAINTS) : "");
+      setConfirmedDeliveryConstraints(String(prepare.harness.deliveryConstraints || DEFAULT_DELIVERY_CONSTRAINTS));
       setAmbiguityReviewMode(importedAmbiguityMode);
       setShowTrace(prepare.execution.showTrace !== false);
       setRoles(importedRoles.length ? importedRoles : initialRoles);
@@ -2417,6 +2763,9 @@ export function SubtitleStudio() {
       setProjectNotice(`已打开 ${file.name}；密钥未从项目文件读取`);
       setSaved(true);
       const nextWorkspace = project.workspace === "running" && project.job?.id ? "running" : project.workspace === "review" ? "review" : "prepare";
+      const importedJobId = project.job?.id && /^[a-f0-9-]{36}$/i.test(project.job.id) ? project.job.id : "";
+      completedJobHydratedRef.current = nextWorkspace === "review" ? importedJobId : "";
+      completedJobAutoOpenedRef.current = nextWorkspace === "review" ? importedJobId : "";
       setWorkspace(nextWorkspace);
     } catch (error) {
       setRunError(error instanceof Error ? `打开项目失败：${error.message}` : "打开项目失败");
@@ -2444,6 +2793,8 @@ export function SubtitleStudio() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "导出任务创建失败");
+      completedJobHydratedRef.current = "";
+      completedJobAutoOpenedRef.current = "";
       setRunMessage("正在根据精修结果重新生成并封装");
       setWorkspace("running");
     } catch (error) {
@@ -2471,7 +2822,7 @@ export function SubtitleStudio() {
   }
 
   const overlayStyle = {
-    "--speaker-color": currentRole?.color ?? "#ffffff",
+    "--speaker-color": visibleRole?.color ?? "#ffffff",
     "--subtitle-size": `${fontSize}px`,
     "--subtitle-weight": fontWeight,
     "--subtitle-outline": `${outline}px`,
@@ -2497,7 +2848,7 @@ export function SubtitleStudio() {
             <span>1</span> 准备
           </button>
           <div className="workflow-line" />
-          <button className={workspace === "running" ? "active" : ""} onClick={() => jobId && setWorkspace("running")}>
+          <button className={workspace === "running" ? "active" : ""} title={jobId ? "查看翻译进度与执行记录" : "尚无翻译任务记录"} onClick={() => jobId && setWorkspace("running")}>
             <span>2</span> 翻译
           </button>
           <div className="workflow-line" />
@@ -2505,7 +2856,7 @@ export function SubtitleStudio() {
             <span>3</span> 精修
           </button>
         </nav>
-        <div className="header-usage" aria-label="Token 使用统计">
+        <div className="header-usage" aria-label="Token 使用统计" data-details={tokenUsageDetails} title={tokenUsageDetails}>
           <span className="header-usage-title"><i />用量估算</span>
           <div><span>合计</span><strong>{formatTokenCount(displayedTokenUsage.total, displayedTokenUsage.available)} Token</strong></div>
           <div className="billing-cache"><span>缓存命中</span><strong>{displayedTokenUsage.cacheAvailable ? `${formatTokenCount(displayedTokenUsage.cachedInput, true)} Token` : "未提供"}</strong></div>
@@ -2513,6 +2864,8 @@ export function SubtitleStudio() {
           <div><span>模型</span><strong>{activeEngineLabel}</strong></div>
         </div>
         <div className="header-actions">
+          {jobId && <button type="button" className="topbar-terminate-button" disabled={terminateBusy} title={`终止当前任务（${jobRunStatus}）`} onClick={() => setTerminateConfirmOpen(true)}><i aria-hidden="true" /><span>{terminateBusy ? "终止中…" : "终止任务"}</span></button>}
+          <button type="button" className="history-job-button" aria-label="打开历史任务" title="选择并打开历史任务记录" onClick={() => void showHistoryDialog()}><ClockCounterClockwise size={16} /></button>
           <div className="project-file-actions" role="group" aria-label="项目文件">
             <input ref={projectInputRef} className="visually-hidden" type="file" accept=".gakuniku,.json,application/json" onChange={(event) => void handleProjectFile(event)} />
             <button type="button" title="打开 GakuNiku 项目文件" onClick={requestOpenStudioProject}><FolderOpen size={15} /><span>打开项目</span></button>
@@ -2525,6 +2878,9 @@ export function SubtitleStudio() {
       </header>
 
       {projectNotice && <div className="project-file-notice" role="status"><FloppyDisk size={15} /><span>{projectNotice}</span><button type="button" aria-label="关闭项目提示" onClick={() => setProjectNotice("")}>×</button></div>}
+
+      {terminateConfirmOpen && jobId && <div className="terminate-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !terminateBusy) setTerminateConfirmOpen(false); }}><section className="terminate-confirm terminate-dialog" role="alertdialog" aria-modal="true" aria-labelledby="terminate-dialog-title"><div><strong id="terminate-dialog-title">确认终止当前任务？</strong><span>{jobRunStatus === "running" ? "会立即停止 Agent 与其子进程，但不会删除已完成阶段和文件，之后仍可断点继续。" : "无论当前处于阻塞、失败、精修或其他页面，都可以执行终止；已经完成或终止的任务只会安全确认状态。"}</span></div><button className="secondary-button" disabled={terminateBusy} onClick={() => setTerminateConfirmOpen(false)}>返回</button><button className="terminate-confirm-button" disabled={terminateBusy} onClick={terminateCurrentJob}>{terminateBusy ? "正在终止…" : "确认终止"}</button></section></div>}
+      {historyDialogOpen && <div className="history-job-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !historyJobBusy) setHistoryDialogOpen(false); }}><section className="history-job-dialog" role="dialog" aria-modal="true" aria-labelledby="history-job-title"><header><span><ClockCounterClockwise size={19} /></span><div><strong id="history-job-title">历史任务</strong><small>选择一条记录，查看八个环节、执行轨迹与 Token 消耗</small></div><button type="button" aria-label="关闭" disabled={historyJobBusy} onClick={() => setHistoryDialogOpen(false)}>×</button></header>{historyJobBusy && !historyJobs.length ? <div className="history-job-empty">正在读取历史任务…</div> : historyJobError ? <p role="alert">{historyJobError}</p> : historyJobs.length ? <div className="history-job-list">{historyJobs.map((item) => <button type="button" key={item.id} className={item.id === jobId ? "current" : ""} onClick={() => void openHistoricalJob(item.id)} disabled={historyJobBusy}><span className={`history-job-status ${item.status}`}>{item.status === "completed" ? "已完成" : item.status === "running" ? "进行中" : item.status === "blocked" ? "已阻塞" : item.status === "failed" ? "失败" : item.status === "cancelled" ? "已终止" : item.status}</span><div><strong>{item.source ? item.source.split(/[\\/]/).at(-1) : "未命名任务"}</strong><small>{item.id}</small></div><time>{item.updatedAt ? new Date(item.updatedAt).toLocaleString("zh-CN") : "时间未知"}</time><CaretRight size={16} /></button>)}</div> : <div className="history-job-empty">还没有历史任务</div>}<footer><small>最多显示最近 60 条本机任务</small><button type="button" className="secondary-button" disabled={historyJobBusy} onClick={() => setHistoryDialogOpen(false)}>关闭</button></footer></section></div>}
 
       {workspace === "prepare" && (
         <main className="prepare-page">
@@ -2547,8 +2903,18 @@ export function SubtitleStudio() {
 
               {engineMode === "api" && <div className="engine-fields engine-grid">
                 <div><label className="field-label" htmlFor="provider">常用模型服务</label><select id="provider" value={provider} onChange={(event) => chooseProvider(event.target.value)}>{Object.entries(apiPresets).map(([id, preset]) => <option key={id} value={id}>{preset.label}</option>)}</select></div>
-                <div className="model-picker"><label className="field-label" htmlFor="api-model">模型</label>{availableModelOptions.length ? <select id="api-model" value={model} onChange={(event) => { setModel(event.target.value); invalidateEngineTest(); }}>{availableModelOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select> : <input id="api-model" value={model} onChange={(event) => { setModel(event.target.value); invalidateEngineTest(); }} placeholder="填写模型 ID" />}{studioMode === "advanced" && <button type="button" onClick={syncProviderModels} disabled={!apiKey.trim() || modelSyncBusy}>{modelSyncBusy ? "同步中…" : "从账户同步模型"}</button>}</div>
-                <div><label className="field-label" htmlFor="api-key">API Key</label><div className="api-key-row"><input id="api-key" type="password" autoComplete="off" value={apiKey} onChange={(event) => { setApiKey(event.target.value); invalidateEngineTest(); }} placeholder="临时保存在当前标签页" /><button type="button" onClick={clearStoredApiKey} disabled={!apiKey}>清除</button></div><label className="remember-key"><input type="checkbox" checked={rememberApiKey} onChange={(event) => setPersistentApiKey(event.target.checked)} /> 保存到本机浏览器，关闭后仍保留</label></div>
+                <div className="model-picker">
+                  <label className="field-label" htmlFor="api-model">模型</label>
+                  <div className="model-picker-row">
+                    <input id="api-model" list="api-model-options" value={model} onChange={(event) => chooseApiModel(event.target.value)} placeholder={apiPresets[provider]?.multimodal === "unavailable" ? "该厂商暂无原生多模态对话模型" : "选择推荐模型或填写模型 ID"} />
+                    <datalist id="api-model-options">{availableModelOptions.map((item) => <option key={item} value={item} />)}</datalist>
+                    <button type="button" title="主动检查当前 API 账户的模型更新" onClick={() => void syncProviderModels()} disabled={!apiKey.trim() || modelSyncBusy}><ArrowClockwise size={14} />{modelSyncBusy ? "检查中" : "检查更新"}</button>
+                  </div>
+                  {recommendedModelOptions.length > 0 && <div className="model-recommendations" aria-label="推荐多模态模型"><span>本版推荐</span>{recommendedModelOptions.slice(0, 4).map((item, index) => <button type="button" className={model === item ? "active" : ""} key={item} onClick={() => chooseApiModel(item)}>{index === 0 && <b>首选</b>}{item}</button>)}</div>}
+                  <small className="model-catalog-hint">{apiKey.trim() ? discoveredModels.length ? `本机已保存检查结果 · ${discoveredModels.length} 个推荐 / ${accountModels.length} 个账户模型` : "当前使用本版内置的官方多模态推荐；需要时再点“检查更新”" : apiPresets[provider]?.multimodal === "unavailable" ? "该厂商当前直连对话模型不能完成图片理解；请换用带原生视觉能力的厂商" : "当前使用本版内置推荐；填写 API Key 后可主动检查账户模型更新"}</small>
+                  {accountModels.length > discoveredModels.length && <button type="button" className="model-catalog-toggle" onClick={() => setShowAllAccountModels((current) => !current)}>{showAllAccountModels ? "收起账户其他模型" : `显示账户其他模型（${accountModels.length - discoveredModels.length}）`}</button>}
+                </div>
+                <div><label className="field-label" htmlFor="api-key">API Key <small>按当前模型独立记忆</small></label><div className="api-key-row"><input id="api-key" type="password" autoComplete="off" value={apiKey} onChange={(event) => { setApiKey(event.target.value); invalidateEngineTest(); }} placeholder="临时保存在当前模型与标签页" /><button type="button" onClick={clearStoredApiKey} disabled={!apiKey}>清除</button></div><label className="remember-key"><input type="checkbox" checked={rememberApiKey} onChange={(event) => setPersistentApiKey(event.target.checked)} /> 按当前模型保存到本机，切换回来自动恢复</label></div>
                 {studioMode === "advanced" && <div><label className="field-label" htmlFor="base-url">Base URL</label><input id="base-url" value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); invalidateEngineTest(); }} placeholder="https://.../v1" /></div>}
                 <section className={`api-pricing-card ${activePriceRule ? "available" : "unavailable"}`} aria-label="当前模型 API 计费规则" title={`价格核对于 ${embeddedApiPricing.checkedAt}${activePriceRule?.note ? ` · ${activePriceRule.note}` : ""}`}>
                   <div className="api-pricing-line">
@@ -2563,6 +2929,7 @@ export function SubtitleStudio() {
                   </div>
                 </section>
                 {studioMode === "advanced" && <div className="provider-verification"><span>官方文档核对：{apiPresets[provider]?.checkedAt || "自定义"}</span>{apiPresets[provider]?.docsUrl && <a href={apiPresets[provider].docsUrl} target="_blank" rel="noreferrer">查看官方模型文档 ↗</a>}<small>{apiPresets[provider]?.note}</small></div>}
+                {(modelCatalogWarning || apiPresets[provider]?.multimodal === "unavailable") && <div className="model-capability-warning"><strong>图文能力不满足</strong><span>{modelCatalogWarning || apiPresets[provider]?.note}</span></div>}
                 {modelSyncMessage && <div className="model-sync-message">{modelSyncMessage}</div>}
               </div>}
 
@@ -2747,6 +3114,7 @@ export function SubtitleStudio() {
                 </div>
                 <fieldset className="step-fields">
                 <p className="panel-intro"><strong>{activeEngineLabel}</strong> 会用下面的关键词决定查什么、核对证据并整理预习文档；搜索 MCP 只负责执行查询与打开网页，再交给你检查修正。</p>
+                <div className="research-required-item"><span>固定检索项</span><strong>人物／成员色与应援色</strong><small>自动识别主要人物并查找角色色、成员色或出演者应援色；优先官方来源，找不到时在文档中标记待核实。</small></div>
                 <label className="field-label" htmlFor="keyword">知识关键词</label>
                 <div className="tag-editor">
                   {keywords.map((keyword) => (
@@ -2792,8 +3160,8 @@ export function SubtitleStudio() {
             </section>
 
             <section ref={(node) => { workflowStepRefs.current.harness = node; }} className={`panel harness-panel workflow-step ${cameraFocus === "harness" ? "camera-focused" : ""}`}>
-                <div className="harness-heading"><div><span className="section-index">04</span><strong>检查并确认 Precision harness</strong></div><button onClick={() => setHarnessOpen(true)}>{harnessVerified ? "✓ 已确认 · 再次查看" : "查看 / 修改 / 确认"}</button></div>
-                <p>内置可审计的 8 阶段字幕流水线</p>
+                <div className="harness-heading"><div><span className="section-index">04</span><strong>Precision harness</strong></div><button onClick={() => setHarnessOpen(true)}>{harnessChanged ? "已修改 · 查看" : "查看 / 修改"}</button></div>
+                <p>内置可审计的 8 阶段字幕流水线，默认直接采用，无需额外确认</p>
                 <ol>
                   {phaseDefinitions.map(([, label], index) => <li key={label}><span>{index + 1}</span>{label}{index === 1 && <em>研究门槛</em>}</li>)}
                 </ol>
@@ -2803,12 +3171,18 @@ export function SubtitleStudio() {
                     {Object.entries(ambiguityReviewPresets).map(([value, preset]) => <option value={value} key={value}>{preset.label}</option>)}
                   </select>
                 </label>
+                <div className="harness-rule identity-pair-rule"><span>✓</span><p><strong>人物身份成对、只建一个元素</strong>角色名与对应声优写在同一人物实体中，不拆成两个人；同时判断当前素材中是“角色发言”还是“声优本人发言”。</p></div>
                 <div className="harness-rule"><span>✓</span><label className="harness-rule-editor"><strong>成片约束 <em>{confirmedDeliveryConstraints === deliveryConstraints ? "已保存" : "待保存"}</em></strong><div><input aria-label="成片约束" value={deliveryConstraints} onChange={(event) => setDeliveryConstraints(event.target.value)} /><button type="button" disabled={!deliveryConstraints.trim() || confirmedDeliveryConstraints === deliveryConstraints} onClick={() => { const normalized = deliveryConstraints.trim(); setDeliveryConstraints(normalized); setConfirmedDeliveryConstraints(normalized); }}>{confirmedDeliveryConstraints === deliveryConstraints ? "已保存" : "保存"}</button></div></label></div>
+                {currentExternalProcessingPlan.required && <section className={externalConsentChecked ? "inline-external-consent granted" : "inline-external-consent"}>
+                  <div className="inline-external-consent-heading"><span>EXTERNAL PROCESSING</span><strong>当前任务的外部模型处理</strong><small>授权只适用于本次任务，不保存 API Key，也不授权公开或转发视频。</small></div>
+                  <div className="inline-external-consent-summary"><span><b>接收服务</b>{currentExternalProcessingPlan.services.map((service) => `${service.provider} / ${service.model}`).join("、")}</span><span><b>发送范围</b>{currentExternalProcessingPlan.dataTypes.join("、")}</span></div>
+                  <label><input aria-label="允许当前任务使用外部模型" type="checkbox" checked={externalConsentChecked} onChange={(event) => setExternalConsentChecked(event.target.checked)} /><span><strong>允许上述服务仅为本次字幕任务处理这些数据</strong><small>{transcriptionMode === "api" ? "在线听写会发送分块音频；媒体始终按磁盘分块处理。" : "本地听写不会上传整段音视频；只发送文本与必要的疑点画面裁切。"}</small></span></label>
+                </section>}
             </section>
 
             {cameraFocus === "harness" && <div className="workflow-launch">
               <label className="trace-option"><input aria-label="显示 Agent 执行轨迹" type="checkbox" checked={showTrace} onChange={(event) => setShowTrace(event.target.checked)} /><span><strong>显示 Agent 执行轨迹</strong><small>查看工具动作与推理摘要，不展示隐藏思维链</small></span></label>
-              <button className="primary-action" onClick={startTranslation}><span>▶</span><strong>开始翻译并统一检查</strong><small>{engineVerified && videoReady && transcriptionReadyForCamera && researchReady && harnessVerified ? "所有准备项已完成，点击后创建任务" : "缺项会准确定位回对应步骤；已经填写的内容不会丢失"}</small></button>
+              <button className="primary-action" onClick={() => void startTranslation()}><span>▶</span><strong>开始翻译并统一检查</strong><small>{engineVerified && videoReady && transcriptionReadyForCamera && researchReady && (!currentExternalProcessingPlan.required || externalConsentChecked) ? "所有准备项已完成，点击后创建任务" : "缺项会准确定位回对应步骤；已经填写的内容不会丢失"}</small></button>
               <p className="resource-note">低内存模式：媒体按需解码，Agent 输出直接写入日志。</p>
             </div>}
           </div>
@@ -2819,7 +3193,7 @@ export function SubtitleStudio() {
               <button className={cameraFocus === "engine" ? "active" : ""} onClick={() => focusPrepareStage("engine")}><i>1</i><span><SlidersHorizontal size={26} /><span><span className="workflow-overview-title"><strong>设置并测试翻译引擎</strong><em className={engineVerified ? "done" : ""}>{engineVerified ? "已通过" : "进行中"}</em></span><small>选择模式与模型，完成能力测试</small></span></span><CaretRight size={18} /></button>
               <button className={cameraFocus === "source" ? "active" : ""} onClick={() => focusPrepareStage("source")}><i>2</i><span><FilmStrip size={26} /><span><span className="workflow-overview-title"><strong>视频与输出</strong><em className={videoReady ? "done" : ""}>{videoReady ? "已设置" : "待配置"}</em></span><small>视频来源、听写和输出格式</small></span></span><CaretRight size={18} /></button>
               <button className={cameraFocus === "research" ? "active" : ""} onClick={() => focusPrepareStage("research")}><i>3</i><span><MagnifyingGlass size={26} /><span><span className="workflow-overview-title"><strong>检索并检查预习结果</strong><em className={researchReady ? "done" : ""}>{researchReady ? "已生成" : "待执行"}</em></span><small>检索背景知识并核对证据</small></span></span><CaretRight size={18} /></button>
-              <button className={cameraFocus === "harness" ? "active" : ""} onClick={() => focusPrepareStage("harness")}><i>4</i><span><Target size={26} /><span><span className="workflow-overview-title"><strong>Precision harness</strong><em className={harnessVerified ? "done" : ""}>{harnessVerified ? "已确认" : "待确认"}</em></span><small>检查执行规范与成片约束</small></span></span><CaretRight size={18} /></button>
+              <button className={cameraFocus === "harness" ? "active" : ""} onClick={() => focusPrepareStage("harness")}><i>4</i><span><Target size={26} /><span><span className="workflow-overview-title"><strong>Precision harness</strong><em className={harnessReady ? "done" : ""}>{harnessReady ? "已启用" : "加载中"}</em></span><small>默认采用，可按需修改执行规范</small></span></span><CaretRight size={18} /></button>
             </div>
             <section className="workflow-next-action"><span>下一步行动</span><strong>配置视频与听写</strong><button onClick={() => focusPrepareStage("source")}><FilmStrip size={17} />去配置视频与听写<CaretRight size={16} /></button></section>
           </aside>
@@ -2853,9 +3227,11 @@ export function SubtitleStudio() {
             {selectedPhaseId && phaseDetails[selectedPhaseId] && <section className="phase-detail-panel"><header><strong>{phaseDefinitions.find(([id]) => id === selectedPhaseId)?.[1]}详情</strong><button onClick={() => setSelectedPhaseId("")}>×</button></header>{phaseDetails[selectedPhaseId].detail && <p>{phaseDetails[selectedPhaseId].detail}</p>}{phaseDetails[selectedPhaseId].riskSummary && <div className="phase-risk-summary"><span>候选 {phaseDetails[selectedPhaseId].riskSummary?.total || 0}</span><span>重点复核 {phaseDetails[selectedPhaseId].riskSummary?.deep_reviewed || 0}</span><span>自动放行 {phaseDetails[selectedPhaseId].riskSummary?.auto_released || 0}</span><span>留待精修 {phaseDetails[selectedPhaseId].riskSummary?.needs_refine || 0}</span></div>}<div className="phase-detail-times"><span>开始：{phaseDetails[selectedPhaseId].startedAt ? new Date(phaseDetails[selectedPhaseId].startedAt!).toLocaleString() : "未记录"}</span><span>结束：{phaseDetails[selectedPhaseId].finishedAt ? new Date(phaseDetails[selectedPhaseId].finishedAt!).toLocaleString() : "未结束"}</span></div>{phaseDetails[selectedPhaseId].evidence.length > 0 && <div className="phase-evidence">{phaseDetails[selectedPhaseId].evidence.map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</div>}</section>}
             {showTrace && <section className="trace-panel"><div className="trace-heading"><strong>Agent 执行轨迹</strong><span>{trace.length ? "实时更新" : "等待模型输出"}</span></div><div className="trace-feed">{trace.length ? trace.map((event, index) => <div className={`trace-event ${event.kind}`} key={`${index}-${event.text}`}><i /> <span>{event.text}</span></div>) : <div className="trace-empty">任务启动后，这里会显示检索、读取、媒体处理和阶段摘要。</div>}</div></section>}
             {manifestLimitations.length > 0 && <section className="run-limitations"><strong>当前限制</strong>{manifestLimitations.map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</section>}
+            {manifestNotices.length > 0 && <section className="run-notices"><strong>成片说明</strong>{manifestNotices.map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</section>}
             {jobDiagnostics?.stderr?.length ? <details className="run-diagnostics"><summary>查看错误日志摘要</summary><pre>{jobDiagnostics.stderr.join("\n")}</pre><small>日志位置：{jobDiagnostics.logPath}</small></details> : null}
-            {jobBlocker && <section className="job-blocker"><header><span>需要处理</span><strong>{jobBlocker.label}</strong></header><p>{jobBlocker.detail}</p>{jobBlocker.evidence.length > 0 && <div>{jobBlocker.evidence.slice(-3).map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</div>}<div className="job-blocker-actions"><button className="secondary-button" onClick={() => { setWorkspace("prepare"); if (jobBlocker.phase === "source_transcript") window.setTimeout(() => document.querySelector(".transcription-config")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); }}>返回设置并处理</button><button className="resume-button" disabled={resumeBusy || !engineVerified || !transcriptionEnvironment?.ready} onClick={resumeBlockedJob}>{resumeBusy ? "正在续跑…" : `从${phaseDefinitions.find(([id]) => id === jobBlocker.phase)?.[1] || "阻塞阶段"}继续`}</button></div>{(!engineVerified || !transcriptionEnvironment?.ready) && <small className="resume-hint">重新测试翻译模型并修复听写环境后即可续跑；真实短音频测试是可选诊断。</small>}</section>}
-            {runError && <div className="notice error"><strong>{jobConnectionFailures ? "正在重新连接" : jobBlocker ? "任务已阻塞" : "任务中断"}</strong><span>{runError}</span>{jobConnectionFailures > 0 && <button className="notice-retry" onClick={() => { setRunError(""); setJobPollRevision((value) => value + 1); }}>立即重试</button>}</div>}
+            {jobBlocker && <section className="job-blocker"><header><span>需要处理</span><strong>{jobBlocker.label}</strong></header><p>{jobBlocker.detail}</p>{jobBlocker.evidence.length > 0 && <div>{jobBlocker.evidence.slice(-3).map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</div>}<div className="job-blocker-actions"><button className="secondary-button" onClick={() => { setWorkspace("prepare"); if (jobBlocker.phase === "source_transcript") window.setTimeout(() => document.querySelector(".transcription-config")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); }}>返回设置并处理</button><button className="resume-button" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : `从${phaseDefinitions.find(([id]) => id === jobBlocker.phase)?.[1] || "阻塞阶段"}继续`}</button></div>{(!engineVerified || (transcriptionEnvironment && !transcriptionEnvironment.ready)) && <small className="resume-hint">点击继续时会重新核对模型凭据与听写环境；真实短音频测试是可选诊断。</small>}</section>}
+            {runError && <div className="notice error"><strong>{jobConnectionFailures ? "正在重新连接" : jobBlocker ? "任务已阻塞" : "任务中断"}</strong><span>{runError}</span>{jobConnectionFailures > 0 && <button className="notice-retry" onClick={() => { setRunError(""); setJobPollRevision((value) => value + 1); }}>立即重试</button>}{!jobConnectionFailures && !jobBlocker && jobId && <button className="notice-retry" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : "从断点继续"}</button>}</div>}
+            {jobRunStatus === "cancelled" && <section className="job-cancelled"><div><strong>任务已终止</strong><span>Agent 与子进程已经停止；已完成阶段和现有文件均已保留。</span></div><button className="resume-button" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : "从断点继续"}</button></section>}
             <div className="run-footer"><span>任务 ID：{jobId || "创建中"}</span><button className="secondary-button" onClick={() => setWorkspace("prepare")}>返回设置</button><button className="secondary-button" onClick={loadDemo}>打开示例精修台</button></div>
           </section>
         </main>
@@ -2878,8 +3254,8 @@ export function SubtitleStudio() {
             <section className="preview-column">
               <div className="video-stage">
                 {previewUrl ? <video ref={videoRef} src={previewUrl} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)}><track kind="captions" src="data:text/vtt,WEBVTT" srcLang="zh-CN" label="中文字幕预览" default /></video> : <div className="video-placeholder"><div className="stage-grid" /><span>视频预览</span><small>选择本地文件即可在此预览；示例仅展示字幕效果</small></div>}
-                {currentCue && <div className="subtitle-safe-area" style={overlayStyle}>
-                  <div className="subtitle-overlay"><span className="speaker-label">{currentRole?.name}</span>{currentCue.translation}</div>
+                {visibleCue && <div className="subtitle-safe-area" style={overlayStyle}>
+                  <div className="subtitle-overlay"><span className="speaker-label">{visibleRole?.name}</span>{visibleCue.translation}</div>
                 </div>}
                 <button className="center-play" onClick={togglePlayback}>{isPlaying ? "Ⅱ" : "▶"}</button>
               </div>
@@ -2907,9 +3283,16 @@ export function SubtitleStudio() {
                 <section className="control-section"><div className="control-heading"><strong>角色色效果</strong><span className="auto-badge">自动</span></div>
                   {[{ label: "外圈描边", value: outline, set: setOutline, max: 8 }, { label: "柔光", value: glow, set: setGlow, max: 20 }, { label: "投影", value: shadow, set: setShadow, max: 10 }].map((control) => <label className="range-control" key={control.label}><span>{control.label}<b>{control.value}px</b></span><input type="range" min="0" max={control.max} value={control.value} onChange={(event) => { const value = Number(event.target.value); if (value === control.value) return; rememberReviewState(`style:${control.label}`, true); control.set(value); setSaved(false); }} /></label>)}
                 </section>
-                <section className="control-section roles-section"><div className="control-heading"><strong>识别出的角色</strong><span>{roles.length} 位</span></div>
-                  <div className="role-list">{roles.map((role) => <div className="role-row" key={role.id}><input className="color-input" type="color" value={role.color} aria-label={`${role.name}颜色`} onChange={(event) => updateRole(role.id, { color: event.target.value }, { historyKey: `role:${role.id}:color`, coalesce: true })} /><input value={role.name} onChange={(event) => updateRole(role.id, { name: event.target.value }, { historyKey: `role:${role.id}:name`, coalesce: true })} /><span style={{ background: role.color }} /></div>)}</div>
-                  <button className="add-role" onClick={addReviewRole}>＋ 添加角色</button>
+                <section className="control-section roles-section"><div className="control-heading"><strong>识别出的人物实体</strong><span>{roles.length} 位</span></div>
+                  <p className="roles-section-hint">每行同时保存角色与声优，只按当前发言身份显示一个字幕名。</p>
+                  <div className="role-list">{roles.map((role) => <div className="role-row" key={role.id}>
+                    <input className="color-input" type="color" value={role.color} aria-label={`${role.name}颜色`} onChange={(event) => updateRole(role.id, { color: event.target.value }, { historyKey: `role:${role.id}:color`, coalesce: true })} />
+                    <div className="role-identity-editor">
+                      <div className="role-pair-inputs"><label><span>角色</span><input value={role.characterName || ""} placeholder="角色名" onChange={(event) => { const characterName = event.target.value; updateRole(role.id, { characterName, ...(role.speakingAs === "character" || (role.speakingAs === "unknown" && !role.performerName) ? { name: characterName || role.performerName || "未确认人物" } : {}) }, { historyKey: `role:${role.id}:character`, coalesce: true }); }} /></label><label><span>声优</span><input value={role.performerName || ""} placeholder="声优名" onChange={(event) => { const performerName = event.target.value; updateRole(role.id, { performerName, ...(role.speakingAs === "performer" || (role.speakingAs === "unknown" && !role.characterName) ? { name: performerName || role.characterName || "未确认人物" } : {}) }, { historyKey: `role:${role.id}:performer`, coalesce: true }); }} /></label></div>
+                      <div className="role-speaking-as"><select aria-label={`${role.name}当前发言身份`} value={role.speakingAs || "unknown"} onChange={(event) => { const speakingAs = event.target.value as SpeakerIdentity; const name = speakingAs === "character" ? role.characterName || role.name : speakingAs === "performer" ? role.performerName || role.name : role.name; updateRole(role.id, { speakingAs, name }); }}><option value="character">角色发言</option><option value="performer">声优本人</option><option value="unknown">待确认</option></select><small>字幕标注：{role.name} · {speakerIdentityLabel(role.speakingAs)}</small><i style={{ background: role.color }} /></div>
+                    </div>
+                  </div>)}</div>
+                  <button className="add-role" onClick={addReviewRole}>＋ 添加人物实体</button>
                 </section>
               </div>
             </aside>
@@ -2946,7 +3329,7 @@ export function SubtitleStudio() {
             <aside className="sentence-editor">
               <div className="sentence-heading"><div><span>句子 {selectedCue.id}</span>{selectedCue.flagged && <em>低置信度</em>}</div><div><button aria-label="上一句" onClick={() => selectAdjacentCue(-1)}>‹</button><button aria-label="下一句" onClick={() => selectAdjacentCue(1)}>›</button></div></div>
               <label className="field-label" htmlFor="speaker">说话人</label>
-              <select id="speaker" value={selectedCue.speakerId} onChange={(event) => updateCue({ speakerId: event.target.value })}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select>
+              <select id="speaker" value={selectedCue.speakerId} onChange={(event) => updateCue({ speakerId: event.target.value })}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name} · {speakerIdentityLabel(role.speakingAs)}</option>)}</select>
               <div className="time-editor"><div><label className="field-label" htmlFor="start-time">开始</label><input key={`start-${selectedCue.id}-${selectedCue.start}`} id="start-time" defaultValue={formatTime(selectedCue.start)} onBlur={(event) => { const value = parseTime(event.target.value); if (value !== null) updateCue({ start: value }); else event.target.value = formatTime(selectedCue.start); }} /></div><span>→</span><div><label className="field-label" htmlFor="end-time">结束</label><input key={`end-${selectedCue.id}-${selectedCue.end}`} id="end-time" defaultValue={formatTime(selectedCue.end)} onBlur={(event) => { const value = parseTime(event.target.value); if (value !== null) updateCue({ end: value }); else event.target.value = formatTime(selectedCue.end); }} /></div></div>
               <label className="field-label" htmlFor="source-copy">日语原文</label><textarea id="source-copy" rows={3} value={selectedCue.source} onChange={(event) => updateCue({ source: event.target.value }, { historyKey: `cue:${selectedCue.id}:source`, coalesce: true })} />
               <div className="translation-label"><label className="field-label" htmlFor="translation-copy">中文译文</label><span>{selectedCue.translation.replace(/\s/g, "").length} 字 · 预计 {Math.min(2, selectedCue.translation.split("\n").length)} 行</span></div>
@@ -2978,10 +3361,10 @@ export function SubtitleStudio() {
 
       {harnessOpen && <div className="modal-backdrop harness-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setHarnessOpen(false); }}>
         <section className="studio-modal harness-modal" role="dialog" aria-modal="true" aria-labelledby="harness-modal-title">
-          <header><div><span>PRECISION HARNESS</span><h2 id="harness-modal-title">查看与修改执行规范</h2><p>覆盖稿只随当前任务保存，不会改写项目内置 Harness</p></div><div className="harness-header-actions"><div className={harnessChanged ? "edit-state changed" : "edit-state"}><i />{harnessChanged ? "已修改" : "原始版本"}</div><button aria-label="关闭 harness" onClick={() => setHarnessOpen(false)}>×</button></div></header>
+          <header><div><span>PRECISION HARNESS</span><h2 id="harness-modal-title">查看与修改执行规范</h2><p>默认规则已启用；覆盖稿只随当前任务保存，不会改写项目内置 Harness</p></div><div className="harness-header-actions"><div className={harnessChanged ? "edit-state changed" : "edit-state"}><i />{harnessChanged ? "已修改" : "原始版本"}</div><button aria-label="关闭 harness" onClick={() => setHarnessOpen(false)}>×</button></div></header>
           <div className="harness-toolbar"><div><strong>SKILL.md</strong><span>当前任务覆盖稿</span></div><div className="harness-stats"><span>{harnessLines} 行</span><span>{harnessText.length.toLocaleString()} 字符</span><span>自动换行</span></div></div>
-          <div className="harness-editor-shell"><textarea className="document-editor harness-editor" aria-label="Precision harness 内容" value={harnessText} onChange={(event) => { setHarnessText(event.target.value); setHarnessConfirmed(false); }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); const normalized = deliveryConstraints.trim(); setDeliveryConstraints(normalized); setHarnessConfirmed(true); setHarnessConfirmedText(harnessText); setConfirmedDeliveryConstraints(normalized); setHarnessOpen(false); } }} wrap="soft" spellCheck={false} /></div>
-          <footer><div className="harness-footer-copy"><strong>{harnessChanged ? "当前任务将使用覆盖稿" : "当前任务将使用项目原版"}</strong><span>确认后解锁翻译；再次修改会自动取消确认</span></div><button onClick={() => { setHarnessText(harnessOriginal); setDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS); setHarnessConfirmed(false); }}>恢复原版</button><button className="primary" onClick={() => { const normalized = deliveryConstraints.trim(); setDeliveryConstraints(normalized); setHarnessConfirmed(true); setHarnessConfirmedText(harnessText); setConfirmedDeliveryConstraints(normalized); setHarnessOpen(false); }}>确认并使用 <kbd>⌘ ↵</kbd></button></footer>
+          <div className="harness-editor-shell"><textarea className="document-editor harness-editor" aria-label="Precision harness 内容" value={harnessText} onChange={(event) => setHarnessText(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); const normalized = deliveryConstraints.trim(); setDeliveryConstraints(normalized); setConfirmedDeliveryConstraints(normalized); setHarnessOpen(false); } }} wrap="soft" spellCheck={false} /></div>
+          <footer><div className="harness-footer-copy"><strong>{harnessChanged ? "当前任务将使用覆盖稿" : "当前任务将使用项目原版"}</strong><span>无需额外确认；关闭后当前内容会自动用于本次任务</span></div><button onClick={() => { setHarnessText(harnessOriginal); setDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS); setConfirmedDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS); }}>恢复原版</button><button className="primary" onClick={() => { const normalized = deliveryConstraints.trim(); setDeliveryConstraints(normalized); setConfirmedDeliveryConstraints(normalized); setHarnessOpen(false); }}>保存并关闭 <kbd>⌘ ↵</kbd></button></footer>
         </section>
       </div>}
 

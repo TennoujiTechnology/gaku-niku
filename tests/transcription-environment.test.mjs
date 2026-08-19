@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -236,6 +236,89 @@ test("stale running task with every manifest phase complete is reconciled as com
   assert.equal(result.error, undefined);
 });
 
+test("completed task separates informational provenance from actionable limitations", async (t) => {
+  const bridge = await startBridge();
+  t.after(() => bridge.child.kill());
+  const jobId = "1268d3a1-9e92-49f6-882b-5a4a56b9453b";
+  const jobDirectory = path.join(bridge.root, "jobs", jobId);
+  await mkdir(jobDirectory, { recursive: true });
+  await writeFile(path.join(jobDirectory, "job-state.json"), JSON.stringify({ id: jobId, status: "completed", message: "done" }));
+  await writeFile(path.join(jobDirectory, "manifest.json"), JSON.stringify({
+    phases: Object.fromEntries(["acquire", "research", "source_transcript", "translate", "resolve_ambiguities", "subtitle_qc", "mux", "final_validation"].map((id) => [id, { status: "complete", evidence: [`${id} ready`] }])),
+    artifacts: {},
+    notices: ["字体已嵌入交付文件。"],
+    limitations: [
+      "Official role colour codes were not established; ASS styling uses the deterministic fallback palette.",
+      "Cue 8 is resolved but remains flagged=true for optional refinement-workbench inspection.",
+      "Output duration differs from the source by more than one second.",
+      "Role colours use a fallback palette but are unreadable on bright frames.",
+    ],
+  }));
+  await writeFile(path.join(jobDirectory, "studio-job.json"), JSON.stringify({ execution: { showTrace: false } }));
+
+  const result = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}`).then((item) => item.json());
+  assert.deepEqual(result.manifest.limitations, [
+    "Output duration differs from the source by more than one second.",
+    "Role colours use a fallback palette but are unreadable on bright frames.",
+  ]);
+  assert.equal(result.manifest.notices.length, 3);
+  assert.match(result.manifest.notices.join("\n"), /确定性回退色/);
+  assert.match(result.manifest.notices.join("\n"), /可选人工复看/);
+});
+
+test("running task can be terminated without losing its resumable manifest", async (t) => {
+  const bridge = await startBridge();
+  t.after(() => bridge.child.kill());
+  const worker = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  t.after(() => { try { worker.kill("SIGKILL"); } catch { /* already stopped */ } });
+  const jobId = "1268d3a1-9e92-49f6-882b-5a4a56b9453a";
+  const jobDirectory = path.join(bridge.root, "jobs", jobId);
+  await mkdir(path.join(jobDirectory, "work"), { recursive: true });
+  await writeFile(path.join(jobDirectory, "job-state.json"), JSON.stringify({ id: jobId, status: "running", pid: worker.pid, createdAt: new Date().toISOString(), message: "still running" }));
+  await writeFile(path.join(jobDirectory, "manifest.json"), JSON.stringify({
+    phases: {
+      acquire: { status: "complete", evidence: ["source ready"] },
+      research: { status: "in_progress", evidence: ["research started"] },
+      source_transcript: { status: "pending", evidence: [] }, translate: { status: "pending", evidence: [] }, resolve_ambiguities: { status: "pending", evidence: [] }, subtitle_qc: { status: "pending", evidence: [] }, mux: { status: "pending", evidence: [] }, final_validation: { status: "pending", evidence: [] },
+    },
+    artifacts: {}, limitations: [],
+  }));
+  await writeFile(path.join(jobDirectory, "studio-job.json"), JSON.stringify({ execution: { showTrace: false } }));
+
+  const response = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}/cancel`, { method: "POST" });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.resumable, true);
+  assert.match(result.message, /保留|断点/);
+
+  for (let attempt = 0; attempt < 40 && worker.exitCode == null && worker.signalCode == null; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.ok(worker.exitCode != null || worker.signalCode != null, "worker process should be stopped");
+  const saved = JSON.parse(await readFile(path.join(jobDirectory, "job-state.json"), "utf8"));
+  assert.equal(saved.status, "cancelled");
+  const status = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}`).then((item) => item.json());
+  assert.equal(status.status, "cancelled");
+  assert.equal(status.phases.acquire, "done");
+  assert.equal(status.phases.research, "running");
+});
+
+test("terminate endpoint is idempotent for an already completed task", async (t) => {
+  const bridge = await startBridge();
+  t.after(() => bridge.child.kill());
+  const jobId = "1368d3a1-9e92-49f6-882b-5a4a56b9453a";
+  const jobDirectory = path.join(bridge.root, "jobs", jobId);
+  await mkdir(jobDirectory, { recursive: true });
+  await writeFile(path.join(jobDirectory, "job-state.json"), JSON.stringify({ id: jobId, status: "completed", message: "done" }));
+
+  const response = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}/cancel`, { method: "POST" });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.status, "completed");
+  assert.equal(result.alreadyStopped, true);
+  const saved = JSON.parse(await readFile(path.join(jobDirectory, "job-state.json"), "utf8"));
+  assert.equal(saved.status, "completed");
+});
+
 test("resume preserves completed phases and starts from the first blocked phase", async (t) => {
   const bridge = await startBridge();
   t.after(() => bridge.child.kill());
@@ -265,7 +348,16 @@ test("resume preserves completed phases and starts from the first blocked phase"
   }));
   const response = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}/resume`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transcription: { apiKey: "transcription-test-key" } }),
+    body: JSON.stringify({
+      transcription: { apiKey: "transcription-test-key" },
+      externalProcessingConsent: {
+        version: 1,
+        granted: true,
+        grantedAt: new Date().toISOString(),
+        currentTaskOnly: true,
+        fingerprint: "transcription:openai_audio:gpt-4o-mini-transcribe:https://api.example.test",
+      },
+    }),
   });
   assert.equal(response.status, 202);
   const result = await response.json();
@@ -274,4 +366,5 @@ test("resume preserves completed phases and starts from the first blocked phase"
   const status = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}`).then((item) => item.json());
   assert.equal(status.phases.acquire, "done");
   assert.equal(status.phases.research, "done");
+  assert.equal(status.externalProcessingConsent.granted, true);
 });
