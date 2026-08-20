@@ -23174,6 +23174,16 @@
     });
     const videoReady = Boolean(source.trim() && outputPath.trim() && formats.length);
     const transcriptionReadyForCamera = Boolean(transcriptionEnvironment?.ready);
+    const transcriptionRequestedReady = Boolean(transcriptionEnvironment && (transcriptionEnvironment.requestedReady ?? transcriptionEnvironment.ready));
+    const transcriptionRuntimeReady = transcriptionEnvironment?.components.find((item) => item.id === "runtime")?.status === "ready";
+    const transcriptionModelReady = transcriptionEnvironment?.components.find((item) => item.id === "model")?.status === "ready";
+    const transcriptionDiarizationReady = transcriptionEnvironment?.components.find((item) => item.id === "diarization")?.status === "ready";
+    const transcriptionDiarizationNeedsSetup = Boolean(transcriptionEnvironment?.baseReady && transcriptionDiarization && !transcriptionDiarizationReady);
+    const transcriptionNeedsEnvironmentSetup = Boolean(transcriptionEnvironment && (!transcriptionRuntimeReady || !transcriptionModelReady || transcriptionDiarizationNeedsSetup));
+    const transcriptionHasInstallSelection = transcriptionInstallRuntime || transcriptionInstallModel || transcriptionInstallDiarization;
+    const transcriptionInstallSelectionSupported = Boolean(
+      (!transcriptionInstallRuntime && !transcriptionInstallModel || transcriptionEnvironment?.installationCapabilities?.base !== false) && (!transcriptionInstallDiarization || transcriptionEnvironment?.installationCapabilities?.diarization !== false)
+    );
     const researchReady = Boolean(researchPreview.trim());
     const harnessReady = Boolean(harnessText.trim());
     const currentPrepareStage = !engineVerified ? "engine" : !videoReady || !transcriptionReadyForCamera ? "source" : !researchReady ? "research" : "harness";
@@ -23645,10 +23655,11 @@
         if (!transcriptionEnvironmentRoot.trim() && data.environmentRoot) setTranscriptionEnvironmentRoot(String(data.environmentRoot));
         setTranscriptionTestStage("idle");
         setTranscriptionTestResult(null);
-        const missing = Array.isArray(data.components) ? data.components.filter((item) => item.status === "missing").map((item) => item.id) : [];
-        setTranscriptionInstallRuntime(missing.includes("runtime"));
-        setTranscriptionInstallModel(missing.includes("model"));
-        setTranscriptionInstallDiarization(false);
+        const repair = data.diagnostics?.repairComponents || {};
+        setTranscriptionInstallRuntime(Boolean(repair.runtime));
+        setTranscriptionInstallModel(Boolean(repair.model));
+        setTranscriptionInstallDiarization(Boolean(repair.diarization));
+        setTranscriptionInstallOpen(false);
         setTranscriptionInstallConfirmed(false);
         setTranscriptionDiagnosis("");
       } catch (error) {
@@ -23682,8 +23693,16 @@
       invalidateTranscriptionEnvironment();
       await checkTranscriptionEnvironment(recommended);
     }
-    async function prepareTranscriptionEnvironment() {
-      if (!transcriptionInstallConfirmed) return;
+    async function prepareTranscriptionEnvironment(selection) {
+      const selectedRuntime = selection?.runtime ?? transcriptionInstallRuntime;
+      const selectedModel = selection?.model ?? transcriptionInstallModel;
+      const selectedDiarization = selection?.diarization ?? transcriptionInstallDiarization;
+      const confirmed = selection?.confirmed ?? transcriptionInstallConfirmed;
+      if (!confirmed) return;
+      if (!transcriptionEnvironmentRoot.trim()) {
+        setTranscriptionCheckError("\u8BF7\u5148\u786E\u8BA4\u6A21\u578B\u4E0E\u9879\u76EE\u6570\u636E\u6587\u4EF6\u5939\uFF0C\u518D\u5F00\u59CB\u4E0B\u8F7D");
+        return;
+      }
       setTranscriptionInstallBusy(true);
       setTranscriptionCheckError("");
       setTranscriptionInstallEvents([]);
@@ -23698,9 +23717,9 @@
               ...transcriptionPayload(),
               confirmed: true,
               components: {
-                runtime: transcriptionInstallRuntime,
-                model: transcriptionInstallModel,
-                diarization: transcriptionInstallDiarization
+                runtime: selectedRuntime,
+                model: selectedModel,
+                diarization: selectedDiarization
               }
             }
           })
@@ -23730,6 +23749,21 @@
       } finally {
         setTranscriptionInstallBusy(false);
       }
+    }
+    async function prepareDiarizationEnvironment() {
+      setTranscriptionInstallRuntime(false);
+      setTranscriptionInstallModel(false);
+      setTranscriptionInstallDiarization(true);
+      setTranscriptionInstallConfirmed(false);
+      setTranscriptionInstallOpen(true);
+      window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+      await prepareTranscriptionEnvironment({ runtime: false, model: false, diarization: true, confirmed: true });
+    }
+    async function continueWithoutDiarization() {
+      const withoutDiarization = { ...transcriptionPayload(), diarization: false, hfToken: "" };
+      setTranscriptionDiarization(false);
+      invalidateTranscriptionEnvironment();
+      await checkTranscriptionEnvironment(withoutDiarization);
     }
     async function askModelToDiagnoseTranscription() {
       if (!transcriptionEnvironment?.diagnostics || !engineVerified) return;
@@ -25210,11 +25244,11 @@
                 ] })
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("fieldset", { className: "step-fields", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: `step-resolution-banner ${transcriptionEnvironment?.ready ? "ready" : "attention"}`, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: `step-resolution-banner ${transcriptionRequestedReady ? "ready" : "attention"}`, children: [
                   /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: transcriptionEnvironment?.ready ? "RECOMMENDED SETUP READY" : "NO STEP LOCK" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment?.ready ? "\u63A8\u8350\u542C\u5199\u73AF\u5883\u5DF2\u5C31\u7EEA" : transcriptionEnvironment ? "\u542C\u5199\u73AF\u5883\u9700\u8981\u8865\u9F50" : "\u53EF\u4EE5\u5148\u914D\u7F6E\u89C6\u9891\uFF1B\u542C\u5199\u73AF\u5883\u7531\u8FD9\u91CC\u89E3\u51B3" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: transcriptionEnvironment?.ready ? "\u7EE7\u7EED\u586B\u5199\u89C6\u9891\u4E0E\u8F93\u51FA\u5373\u53EF\uFF1B\u771F\u5B9E\u77ED\u97F3\u9891\u6D4B\u8BD5\u662F\u53EF\u9009\u7684\u8D28\u91CF\u8BCA\u65AD\uFF0C\u4E0D\u4F1A\u963B\u6B62\u540E\u7EED\u6B65\u9AA4\u3002" : "\u4E0D\u4F1A\u628A\u4F60\u6321\u5728\u7B2C\u4E00\u6B65\u3002\u53EF\u91C7\u7528 Faster-Whisper turbo\u3001\u65E5\u8BED\u3001\u8BCD\u7EA7\u65F6\u95F4\u6233\u7684\u9ED8\u8BA4\u53C2\u6570\u68C0\u67E5\u672C\u673A\uFF1B\u5982\u9700\u4E0B\u8F7D\uFF0C\u4ECD\u4F1A\u5148\u5C55\u793A\u4F53\u79EF\u548C\u4FDD\u5B58\u4F4D\u7F6E\u4F9B\u4F60\u786E\u8BA4\u3002" })
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: transcriptionRequestedReady ? "RECOMMENDED SETUP READY" : "NO STEP LOCK" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionRequestedReady ? "\u63A8\u8350\u542C\u5199\u73AF\u5883\u5DF2\u5C31\u7EEA" : transcriptionDiarizationNeedsSetup ? "\u57FA\u7840\u542C\u5199\u53EF\u7528\uFF1B\u8BF4\u8BDD\u4EBA\u5206\u79BB\u5F85\u914D\u7F6E" : transcriptionEnvironment ? "\u542C\u5199\u73AF\u5883\u9700\u8981\u8865\u9F50" : "\u53EF\u4EE5\u5148\u914D\u7F6E\u89C6\u9891\uFF1B\u542C\u5199\u73AF\u5883\u7531\u8FD9\u91CC\u89E3\u51B3" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: transcriptionRequestedReady ? "\u7EE7\u7EED\u586B\u5199\u89C6\u9891\u4E0E\u8F93\u51FA\u5373\u53EF\uFF1B\u771F\u5B9E\u77ED\u97F3\u9891\u6D4B\u8BD5\u662F\u53EF\u9009\u7684\u8D28\u91CF\u8BCA\u65AD\uFF0C\u4E0D\u4F1A\u963B\u6B62\u540E\u7EED\u6B65\u9AA4\u3002" : transcriptionDiarizationNeedsSetup ? "\u4E0D\u914D\u7F6E\u4E5F\u80FD\u7EE7\u7EED\u4EFB\u52A1\uFF1B\u9700\u8981\u533A\u5206\u8BF4\u8BDD\u4EBA\u65F6\uFF0C\u53EF\u5728\u4E0B\u65B9\u4E0B\u8F7D\u672C\u5730\u5206\u79BB\u5F15\u64CE\u3002" : "\u4E0D\u4F1A\u628A\u4F60\u6321\u5728\u7B2C\u4E00\u6B65\u3002\u53EF\u91C7\u7528 Faster-Whisper turbo\u3001\u65E5\u8BED\u3001\u8BCD\u7EA7\u65F6\u95F4\u6233\u7684\u9ED8\u8BA4\u53C2\u6570\u68C0\u67E5\u672C\u673A\uFF1B\u5982\u9700\u4E0B\u8F7D\uFF0C\u4ECD\u4F1A\u5148\u5C55\u793A\u4F53\u79EF\u548C\u4FDD\u5B58\u4F4D\u7F6E\u4F9B\u4F60\u786E\u8BA4\u3002" })
                   ] }),
                   !transcriptionEnvironment?.ready && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "step-resolution-actions", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void applyRecommendedTranscriptionSetup(), disabled: transcriptionCheckBusy || transcriptionInstallBusy, children: transcriptionCheckBusy ? "\u6B63\u5728\u68C0\u67E5\u9ED8\u8BA4\u914D\u7F6E\u2026" : "\u91C7\u7528\u63A8\u8350\u53C2\u6570\u5E76\u68C0\u67E5" }),
@@ -25420,12 +25454,12 @@
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: component.label }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: component.detail })
                           ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: component.status === "ready" ? "\u5DF2\u5B58\u5728" : component.status === "optional" ? "\u672A\u542F\u7528" : "\u7F3A\u5931" })
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: component.status === "ready" ? "\u5DF2\u5B58\u5728" : component.status === "optional" ? "\u672A\u542F\u7528" : component.status === "degraded" ? "\u5F85\u914D\u7F6E" : "\u7F3A\u5931" })
                         ] }, component.id)) }),
                         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-resource-grid", children: [
                           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u9884\u8BA1\u6A21\u578B\u4E0B\u8F7D" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.downloadLabel })
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u672C\u6B21\u5F85\u4E0B\u8F7D" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.pendingDownloadLabel || transcriptionEnvironment.resources.downloadLabel })
                           ] }),
                           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5EFA\u8BAE\u53EF\u7528\u5185\u5B58" }),
@@ -25488,9 +25522,25 @@
                             ] })
                           ] })
                         ] }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: `transcription-recommendation ${transcriptionEnvironment.ready ? "ready" : "attention"}`, children: [
-                          transcriptionEnvironment.ready ? "\u2713 " : "",
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: `transcription-recommendation ${transcriptionRequestedReady ? "ready" : "attention"}`, children: [
+                          transcriptionRequestedReady ? "\u2713 " : "",
                           transcriptionEnvironment.recommendation
+                        ] }),
+                        transcriptionDiarizationNeedsSetup && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "transcription-enhancement-action", "aria-live": "polite", children: [
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "OPTIONAL ENHANCEMENT" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX \u5C1A\u672A\u51C6\u5907" : "WhisperX / pyannote \u5C1A\u672A\u51C6\u5907" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? `\u5C06\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u6A21\u578B\u5E76\u521B\u5EFA\u72EC\u7ACB\u672C\u5730\u73AF\u5883\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python` : "\u9700\u8981 Hugging Face \u6A21\u578B\u6743\u9650\uFF1B\u53EF\u6253\u5F00\u914D\u7F6E\u586B\u5199 Token \u5E76\u786E\u8BA4\u6761\u6B3E" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { title: transcriptionEnvironment.diarizationRuntimePath, children: transcriptionEnvironment.diarizationRuntimePath })
+                          ] }),
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-enhancement-actions", children: [
+                            transcriptionDiarizationEngine === "sherpa_onnx" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void prepareDiarizationEnvironment(), disabled: transcriptionInstallBusy || transcriptionEnvironment.installationCapabilities?.diarization === false || !transcriptionEnvironmentRoot.trim(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u914D\u7F6E\u2026" : `\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u5E76\u914D\u7F6E` }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => {
+                              setTranscriptionInstallDiarization(true);
+                              setTranscriptionInstallOpen(true);
+                              window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+                            }, children: "\u6253\u5F00\u914D\u7F6E\u4E0E\u6388\u6743" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: () => void continueWithoutDiarization(), disabled: transcriptionInstallBusy, children: "\u6682\u4E0D\u4F7F\u7528\u8BF4\u8BDD\u4EBA\u5206\u79BB" })
+                          ] })
                         ] }),
                         transcriptionEnvironment.diagnostics && !transcriptionEnvironment.diagnostics.healthy && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "transcription-diagnostics", children: [
                           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-diagnostics-heading", children: [
@@ -25527,15 +25577,15 @@
                           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u6A21\u578B\u7F13\u5B58" }),
                           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.cachePath })
                         ] }),
-                        transcriptionMode === "local" && transcriptionProvider === "faster_whisper" && !transcriptionEnvironment.ready && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-download-panel", children: [
+                        transcriptionMode === "local" && transcriptionProvider === "faster_whisper" && transcriptionNeedsEnvironmentSetup && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-download-panel", children: [
                           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { className: `transcription-download-toggle ${transcriptionInstallOpen ? "open" : "attention"}`, "aria-expanded": transcriptionInstallOpen, onClick: () => {
                             setTranscriptionInstallOpen((value) => !value);
                             setTranscriptionInstallConfirmed(false);
                           }, children: [
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { "aria-hidden": "true", children: transcriptionInstallOpen ? "\u2713" : "\u2193" }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionInstallOpen ? "\u6536\u8D77\u914D\u7F6E\u9009\u9879" : "\u7ACB\u5373\u914D\u7F6E\u7F3A\u5931\u73AF\u5883" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionInstallOpen ? "\u914D\u7F6E\u5185\u5BB9\u5DF2\u5C55\u5F00\uFF0C\u53EF\u5728\u4E0B\u65B9\u786E\u8BA4" : "\u8865\u9F50\u57FA\u7840\u8FD0\u884C\u5E93\uFF0C\u5DF2\u4E0B\u8F7D\u7684\u6A21\u578B\u4E0D\u4F1A\u91CD\u590D\u4E0B\u8F7D" })
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionInstallOpen ? "\u6536\u8D77\u914D\u7F6E\u9009\u9879" : transcriptionDiarizationNeedsSetup ? "\u914D\u7F6E\u8BF4\u8BDD\u4EBA\u5206\u79BB" : "\u7ACB\u5373\u914D\u7F6E\u7F3A\u5931\u73AF\u5883" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionInstallOpen ? "\u914D\u7F6E\u5185\u5BB9\u5DF2\u5C55\u5F00\uFF0C\u53EF\u5728\u4E0B\u65B9\u786E\u8BA4" : transcriptionDiarizationNeedsSetup ? "\u57FA\u7840\u542C\u5199\u4E0D\u4F1A\u91CD\u590D\u5B89\u88C5\uFF1B\u53EA\u8865\u9F50\u5F53\u524D\u589E\u5F3A\u80FD\u529B" : "\u8865\u9F50\u57FA\u7840\u8FD0\u884C\u5E93\uFF0C\u5DF2\u4E0B\u8F7D\u7684\u6A21\u578B\u4E0D\u4F1A\u91CD\u590D\u4E0B\u8F7D" })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { "aria-hidden": "true", children: transcriptionInstallOpen ? "\u2303" : "\u2192" })
                           ] }),
@@ -25565,43 +25615,46 @@
                               ] })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u5B89\u88C5\u57FA\u7840\u542C\u5199\u8FD0\u884C\u5E93", htmlFor: "install-transcription-runtime", children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-runtime", type: "checkbox", checked: transcriptionInstallRuntime, disabled: transcriptionInstallModel && transcriptionEnvironment.components.find((item) => item.id === "runtime")?.status !== "ready", onChange: (event) => {
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-runtime", type: "checkbox", checked: transcriptionInstallRuntime, disabled: transcriptionRuntimeReady || transcriptionInstallModel && !transcriptionRuntimeReady, onChange: (event) => {
                                 setTranscriptionInstallRuntime(event.target.checked);
                                 setTranscriptionInstallConfirmed(false);
                               } }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u57FA\u7840\u542C\u5199\u8FD0\u884C\u5E93" }),
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "Faster-Whisper \u4E0E CTranslate2\uFF0C\u7EA6 250 MB\uFF1B\u7F3A\u5931\u65F6\u662F\u4E0B\u8F7D\u6A21\u578B\u7684\u5FC5\u8981\u9879\u3002\u82E5\u672C\u673A\u7F3A\u5C11 Python 3.11\uFF0C\u9996\u6B21\u8FD8\u4F1A\u51C6\u5907\u7EA6 80 MB \u7684\u72EC\u7ACB\u8FD0\u884C\u73AF\u5883" })
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
+                                  "\u57FA\u7840\u542C\u5199\u8FD0\u884C\u5E93",
+                                  transcriptionRuntimeReady ? " \xB7 \u5DF2\u5C31\u7EEA" : ""
+                                ] }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionRuntimeReady ? "\u5DF2\u901A\u8FC7\u5B8C\u6574\u5BFC\u5165\u9A8C\u8BC1\uFF0C\u4E0D\u4F1A\u91CD\u590D\u5B89\u88C5" : "Faster-Whisper \u4E0E CTranslate2\uFF0C\u7EA6 250 MB\uFF1B\u7F3A\u5931\u65F6\u662F\u4E0B\u8F7D\u6A21\u578B\u7684\u5FC5\u8981\u9879\u3002\u82E5\u672C\u673A\u7F3A\u5C11 Python 3.11\uFF0C\u9996\u6B21\u8FD8\u4F1A\u51C6\u5907\u7EA6 80 MB \u7684\u72EC\u7ACB\u8FD0\u884C\u73AF\u5883" })
                               ] })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": `\u4E0B\u8F7D ${transcriptionModel} \u6A21\u578B`, htmlFor: "install-transcription-model", children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-model", type: "checkbox", checked: transcriptionInstallModel, onChange: (event) => {
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-model", type: "checkbox", checked: transcriptionInstallModel, disabled: transcriptionModelReady, onChange: (event) => {
                                 const checked = event.target.checked;
                                 setTranscriptionInstallModel(checked);
-                                if (checked && transcriptionEnvironment.components.find((item) => item.id === "runtime")?.status !== "ready") setTranscriptionInstallRuntime(true);
+                                if (checked && !transcriptionRuntimeReady) setTranscriptionInstallRuntime(true);
                                 setTranscriptionInstallConfirmed(false);
                               } }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
                                 /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
                                   "\u4E0B\u8F7D ",
                                   transcriptionModel,
-                                  " \u6A21\u578B"
+                                  " \u6A21\u578B",
+                                  transcriptionModelReady ? " \xB7 \u5DF2\u7F13\u5B58" : ""
                                 ] }),
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("small", { children: [
-                                  "\u7EA6 ",
-                                  transcriptionEnvironment.resources.downloadLabel,
-                                  "\uFF0C\u4FDD\u5B58\u5230\u4E0A\u65B9\u7F13\u5B58\u4F4D\u7F6E"
-                                ] })
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionModelReady ? "\u6A21\u578B\u5FEB\u7167\u5DF2\u901A\u8FC7\u5B8C\u6574\u6027\u68C0\u67E5\uFF0C\u4E0D\u4F1A\u91CD\u590D\u4E0B\u8F7D" : `\u7EA6 ${transcriptionEnvironment.resources.downloadLabel}\uFF0C\u4FDD\u5B58\u5230\u4E0A\u65B9\u7F13\u5B58\u4F4D\u7F6E` })
                               ] })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u5B89\u88C5\u672C\u5730\u8BF4\u8BDD\u4EBA\u5206\u79BB", htmlFor: "install-transcription-diarization", children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-diarization", type: "checkbox", checked: transcriptionInstallDiarization, disabled: transcriptionEnvironment.installationCapabilities?.diarization === false, onChange: (event) => {
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-diarization", type: "checkbox", checked: transcriptionInstallDiarization, disabled: transcriptionDiarizationReady || transcriptionEnvironment.installationCapabilities?.diarization === false, onChange: (event) => {
                                 setTranscriptionInstallDiarization(event.target.checked);
                                 setTranscriptionInstallConfirmed(false);
                               } }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX \u672C\u5730\u8BF4\u8BDD\u4EBA\u5206\u79BB\uFF08\u63A8\u8350\uFF09" : "WhisperX / pyannote\uFF08\u9AD8\u7EA7\uFF09" }),
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionEnvironment.installationCapabilities?.diarization === false ? `\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u6258\u7BA1\u5DE5\u5177\u94FE\uFF0C\u4E14 ${transcriptionEnvironment.installationCapabilities.systemPython} \u4E0D\u6EE1\u8DB3 Python 3.10\u20133.13` : transcriptionDiarizationEngine === "sherpa_onnx" ? "\u5B89\u88C5\u72EC\u7ACB CPU \u8FD0\u884C\u5E93\u5E76\u4E0B\u8F7D\u7EA6 47 MB \u6821\u9A8C\u6A21\u578B\uFF1B\u65E0\u9700\u8D26\u53F7\u6216 Hugging Face Token" : "\u4F7F\u7528\u72EC\u7ACB\u4E34\u65F6\u73AF\u5883\u5B89\u88C5\u5E76\u6DF1\u5EA6\u9A8C\u8BC1\uFF1B\u9700\u8981 Hugging Face gated \u6A21\u578B\u6743\u9650" })
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
+                                  transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX \u672C\u5730\u8BF4\u8BDD\u4EBA\u5206\u79BB\uFF08\u63A8\u8350\uFF09" : "WhisperX / pyannote\uFF08\u9AD8\u7EA7\uFF09",
+                                  transcriptionDiarizationReady ? " \xB7 \u5DF2\u5C31\u7EEA" : ""
+                                ] }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionDiarizationReady ? "\u8FD0\u884C\u5E93\u4E0E\u6A21\u578B\u5747\u5DF2\u901A\u8FC7\u68C0\u67E5\uFF0C\u4E0D\u4F1A\u91CD\u590D\u5B89\u88C5" : transcriptionEnvironment.installationCapabilities?.diarization === false ? `\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u6258\u7BA1\u5DE5\u5177\u94FE\uFF0C\u4E14 ${transcriptionEnvironment.installationCapabilities.systemPython} \u4E0D\u6EE1\u8DB3 Python 3.10\u20133.13` : transcriptionDiarizationEngine === "sherpa_onnx" ? `\u5B89\u88C5\u72EC\u7ACB CPU \u8FD0\u884C\u5E93\u5E76\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u6821\u9A8C\u6A21\u578B\uFF1B\u65E0\u9700\u8D26\u53F7\u6216 Hugging Face Token` : "\u4F7F\u7528\u72EC\u7ACB\u4E34\u65F6\u73AF\u5883\u5B89\u88C5\u5E76\u6DF1\u5EA6\u9A8C\u8BC1\uFF1B\u9700\u8981 Hugging Face gated \u6A21\u578B\u6743\u9650" })
                               ] })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u786E\u8BA4\u542C\u5199\u73AF\u5883\u4E0B\u8F7D", className: "transcription-install-confirm", htmlFor: "confirm-transcription-install", children: [
@@ -25611,7 +25664,7 @@
                                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u53EA\u6709\u52FE\u9009\u540E\u624D\u5141\u8BB8\u8054\u7F51\u5B89\u88C5\u6216\u4E0B\u8F7D\uFF1B\u4F7F\u7528\u5E94\u7528\u81EA\u5DF1\u7684\u8FD0\u884C\u76EE\u5F55\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python" })
                               ] })
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "primary-install-button", disabled: !transcriptionEnvironment.installable || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || !transcriptionInstallRuntime && !transcriptionInstallModel && !transcriptionInstallDiarization, onClick: prepareTranscriptionEnvironment, children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u51C6\u5907\u2026" : "\u5B89\u5168\u914D\u7F6E\u672C\u5730\u73AF\u5883" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "primary-install-button", disabled: !transcriptionEnvironment.installable || !transcriptionInstallSelectionSupported || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || !transcriptionHasInstallSelection, onClick: () => void prepareTranscriptionEnvironment(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u51C6\u5907\u2026" : "\u5B89\u5168\u914D\u7F6E\u672C\u5730\u73AF\u5883" }),
                             transcriptionInstallEvents.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "transcription-install-log", children: transcriptionInstallEvents.map((event, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: event.kind, children: [
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", {}),
                               event.text

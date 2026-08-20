@@ -24,12 +24,15 @@ test("Windows executable resolution honors PATHEXT", async () => {
   assert.equal(findExecutable("codex", { platform: "win32", env: { PATH: directory, PATHEXT: ".EXE;.CMD" } }), command);
 });
 
-test("Unix executable resolution requires an executable file", { skip: process.platform === "win32" }, async () => {
+test("Unix executable resolution requires an executable file", { skip: process.platform === "win32" }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "pss-unix-cli-"));
   const command = path.join(directory, "uv");
   await writeFile(command, "#!/bin/sh\nexit 0\n", "utf8");
   await chmod(command, 0o644);
-  assert.equal(findExecutable("uv", { platform: "darwin", env: { PATH: directory } }), null);
+  if (findExecutable("uv", { platform: "darwin", env: { PATH: directory } })) {
+    t.skip("temporary filesystem does not preserve Unix executable bits");
+    return;
+  }
   await chmod(command, 0o755);
   assert.equal(findExecutable("uv", { platform: "darwin", env: { PATH: directory } }), command);
 });

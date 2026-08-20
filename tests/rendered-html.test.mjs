@@ -85,6 +85,9 @@ test("ships the real harness and low-memory local bridge", async () => {
     "已下载的模型不会重复下载",
     "安全配置本地环境",
     "Sherpa-ONNX 本地说话人分离（推荐）",
+    "OPTIONAL ENHANCEMENT",
+    "暂不使用说话人分离",
+    "只补齐当前增强能力",
     "WhisperX / pyannote（高级 · 需 HF 权限）",
     "本次配置为什么没有完成",
     "让第一步模型辅助分析",
@@ -157,6 +160,9 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.doesNotMatch(component, /requiresTranscriptionSampleTest|transcriptionTestFingerprint/i);
   assert.doesNotMatch(component, /尚未确认 Precision harness|允许本任务使用外部模型？|externalConsentOpen/);
   assert.match(component, /环境位置、依赖与下载选项/);
+  assert.match(component, /transcriptionRequestedReady/);
+  assert.match(component, /transcriptionDiarizationNeedsSetup/);
+  assert.match(component, /prepareDiarizationEnvironment/);
   assert.match(component, /deliveryConstraints/);
   assert.match(component, /ENGINE_VERIFICATION_STORE/);
   assert.match(component, /SEARCH_VERIFICATION_STORE/);

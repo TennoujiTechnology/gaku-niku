@@ -49,7 +49,7 @@ test("transcription check is read-only and reports missing local dependencies", 
   assert.equal(result.diarizationRuntimePath, path.join(bridge.root, "default-asr", "runtimes", "diarization-sherpa-onnx"));
   assert.equal(result.diarizationEngine, "sherpa_onnx");
   assert.equal(result.cachePath, path.join(bridge.root, "default-asr", "models"));
-  assert.equal(result.storageLayout.mode, "project");
+  assert.equal(result.storageLayout.mode, result.storageLayout.runtimeCompatible ? "project" : "split");
   assert.equal(result.diagnostics.healthy, false);
   assert.equal(result.diagnostics.repairComponents.runtime, true);
 });
@@ -66,8 +66,13 @@ test("transcription check respects a user-selected project environment folder", 
   assert.equal(response.status, 200);
   const result = await response.json();
   assert.equal(result.environmentRoot, environmentRoot);
-  assert.equal(result.runtimePath, path.join(environmentRoot, "runtimes", "base"));
-  assert.equal(result.diarizationRuntimePath, path.join(environmentRoot, "runtimes", "diarization-sherpa-onnx"));
+  if (result.storageLayout.runtimeCompatible) {
+    assert.equal(result.runtimePath, path.join(environmentRoot, "runtimes", "base"));
+    assert.equal(result.diarizationRuntimePath, path.join(environmentRoot, "runtimes", "diarization-sherpa-onnx"));
+  } else {
+    assert.match(result.runtimePath, new RegExp(`^${path.join(bridge.root, "local-runtimes").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(result.diarizationRuntimePath, new RegExp(`^${path.join(bridge.root, "local-runtimes").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  }
   assert.equal(result.cachePath, path.join(environmentRoot, "models"));
 });
 
@@ -137,8 +142,13 @@ test("requested diarization reports deep imports and authorization separately", 
   assert.equal(response.status, 200);
   const result = await response.json();
   assert.equal(result.ready, false);
+  assert.equal(result.requestedReady, false);
+  assert.equal(result.diarizationReady, false);
   assert.equal(result.diagnostics.repairComponents.diarization, true);
   assert.ok(result.diagnostics.issues.some((item) => item.id === "diarization-import"));
+  assert.equal(result.components.find((item) => item.id === "diarization")?.status, "degraded");
+  assert.match(result.resources.diarizationDownloadLabel, /MB/);
+  assert.match(result.recommendation, result.baseReady ? /下载并配置 Sherpa-ONNX|关闭说话人分离/ : /缺失项目|下载/);
 });
 
 test("online real-audio test refuses upload without explicit confirmation", async (t) => {

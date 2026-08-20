@@ -724,6 +724,10 @@ async function transcriptionEnvironment(input = {}) {
   const model = String(input.model || "turbo");
   const wantsDiarization = input.diarization !== false;
   const selectedDiarizationEngine = diarizationEngine(input);
+  const selectedDiarizationManifest = diarizationEnvironmentManifest(input);
+  const diarizationDownloadBytes = selectedDiarizationEngine === "sherpa_onnx"
+    ? Object.values(selectedDiarizationManifest.models || {}).reduce((total, asset) => total + Number(asset?.bytes || 0), 0)
+    : 0;
   const paths = transcriptionPaths(input);
   const profile = transcriptionModelProfiles[model] || { downloadBytes: 0, memoryBytes: 0, label: model };
   const fsInfo = await statfs(existingAncestor(paths.root)).catch(() => null);
@@ -863,6 +867,13 @@ async function transcriptionEnvironment(input = {}) {
   if (previousInstall?.status === "failed" && !currentEnvironmentHealthy) issues.push({ id: "last-install", label: "上次配置中断", detail: previousInstall.error || "上次配置未完成", repair: "按上方缺失项重试；不需要删除整个环境。" });
   return {
     ...common,
+    resources: {
+      ...common.resources,
+      pendingDownloadBytes: (modelReady ? 0 : profile.downloadBytes) + (wantsDiarization && !diarizationReady ? diarizationDownloadBytes : 0),
+      pendingDownloadLabel: formatStorage((modelReady ? 0 : profile.downloadBytes) + (wantsDiarization && !diarizationReady ? diarizationDownloadBytes : 0)),
+      diarizationDownloadBytes,
+      diarizationDownloadLabel: diarizationDownloadBytes ? `约 ${formatStorage(diarizationDownloadBytes)}` : "按所选引擎",
+    },
     python,
     ready: baseReady,
     requestedReady: baseReady && (!wantsDiarization || diarizationReady),
@@ -875,7 +886,7 @@ async function transcriptionEnvironment(input = {}) {
       { id: "diarization", label: "说话人分离（可选）", status: !wantsDiarization ? "optional" : diarizationReady ? "ready" : "degraded", detail: !wantsDiarization ? "当前未启用，不影响基础听写" : selectedDiarizationEngine === "sherpa_onnx" ? diarizationReady ? "Sherpa-ONNX 本地运行库与模型已就绪；不需要 Hugging Face 授权" : `Sherpa-ONNX 尚未准备完整；可下载约 47 MB 模型后启用${paths.filesystem.compatible ? "" : "，运行库会放到本机兼容磁盘"}` : diarizationImportReady ? "WhisperX 独立环境已验证；任务启动预检会实际核对 Hugging Face 模型权限" : `WhisperX 未准备好；任务会立即关闭说话人分离并继续基础听写${paths.filesystem.compatible ? "" : "，运行库可稍后配置到本机兼容磁盘"}` },
       { id: "ffmpeg", label: "音频抽取", status: executable("ffmpeg") ? "ready" : "missing", detail: executable("ffmpeg") || "未发现 FFmpeg" },
     ],
-    installable: baseInstallable,
+    installable: baseInstallable || (wantsDiarization && diarizationInstallable),
     installationCapabilities: {
       base: baseInstallable,
       diarization: diarizationInstallable,
@@ -911,7 +922,7 @@ async function transcriptionEnvironment(input = {}) {
       lastInstall: previousInstall || null,
     },
     recommendation: baseReady
-      ? wantsDiarization && !diarizationReady ? `基础听写已可用；${selectedDiarizationEngine === "pyannote" ? "pyannote" : "Sherpa-ONNX"} 尚未准备，任务启动时会立即降级继续。` : "本地听写环境已准备完成。"
+      ? wantsDiarization && !diarizationReady ? `基础听写已可用；可下载并配置 ${selectedDiarizationEngine === "pyannote" ? "WhisperX / pyannote" : "Sherpa-ONNX"}，或暂时关闭说话人分离后继续。` : "本地听写环境已准备完成。"
       : paths.filesystem.compatible
         ? "勾选缺失项目并确认后下载；运行库与模型会保存在所选项目数据目录。"
         : "勾选缺失项目并确认后下载；模型留在所选磁盘，运行库会自动放到本机兼容目录。",
