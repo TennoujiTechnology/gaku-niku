@@ -323,6 +323,9 @@ input::placeholder, textarea::placeholder { color: #a7afbd; }
 .transcription-diagnostics-heading strong { margin-top: 3px; color: #633f3b; font-size: 10px; }
 .transcription-diagnostics-heading small { margin-top: 3px; color: #9a736e; font-size: 8px; line-height: 1.45; }
 .transcription-diagnostics-heading button { flex: 0 0 auto; min-height: 31px; padding: 0 10px; border: 1px solid #dfb9b3; border-radius: 7px; color: #8c4e47; background: white; font-size: 8px; font-weight: 780; }
+.transcription-diagnostics-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.transcription-diagnostics-heading .transcription-diagnostics-actions .primary { border-color: #2f67e8; color: white; background: #2f67e8; }
+.transcription-diagnostics-heading .transcription-diagnostics-actions .primary:hover:not(:disabled) { background: #2454c8; }
 .transcription-diagnostics-heading button:disabled { cursor: not-allowed; opacity: .5; }
 .transcription-diagnostic-issues { display: grid; gap: 7px; padding: 10px; }
 .transcription-diagnostic-issues article { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; padding: 8px; border: 1px solid #f0deda; border-radius: 7px; background: white; }
@@ -1037,6 +1040,7 @@ input[type="range"] { accent-color: #4675de; height: 3px; padding: 0; border: 0;
   .transcription-environment-path-row { grid-template-columns: 1fr 1fr; }
   .transcription-environment-path-row input { grid-column: 1 / -1; }
   .transcription-diagnostics-heading { align-items: flex-start; flex-direction: column; }
+  .transcription-diagnostics-actions { width: 100%; flex-direction: column; }
   .transcription-diagnostics-heading button { width: 100%; }
   .transcription-enhancement-action { grid-template-columns: 1fr; }
   .transcription-enhancement-actions { align-items: stretch; flex-direction: column; }

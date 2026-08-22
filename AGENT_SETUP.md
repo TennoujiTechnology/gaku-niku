@@ -95,9 +95,9 @@ test -f "/视频/完整路径.mp4"
 ffprobe -v error -show_streams -show_format "/视频/完整路径.mp4"
 ```
 
-## 4. 选择一个 Agent 后端
+## 4. 选择第一步的统一执行模型
 
-至少配置以下一种，不要为了“全都支持”而一次安装全部后端。
+至少配置以下一种，不要为了“全都支持”而一次安装全部后端。第一步通过文字与图片能力测试后，该模型不仅翻译，还会负责第二步环境配置建议、检索规划、疑点判断与最终质检。
 
 | 模式 | 检查 | 备注 |
 | --- | --- | --- |
@@ -105,9 +105,9 @@ ffprobe -v error -show_streams -show_format "/视频/完整路径.mp4"
 | Claude Code | `claude --version` | 复用 Claude 本地登录态 |
 | DeepSeek CLI | `deepseek --version` | 需与项目适配器参数兼容 |
 | Ollama | `ollama --version` | 本地运行；下载模型前先确认磁盘与内存 |
-| API Key | 在网页面板中填写 | Key 只传给当前子进程，不写入项目 |
+| API Key | 在网页面板中填写 | 直接驱动内置 Harness；不需要 Agent CLI |
 
-CLI 模式应先由用户完成对应工具的正常登录。不要代替用户读取、复制或持久化登录令牌。
+API 与 Ollama 模式由项目内置 Harness 执行白名单工具，不得探测或偷偷启动 Codex/Claude。只有用户主动选择 Agent Skill 模式时才调用对应 CLI；CLI 模式应先由用户完成正常登录，不要代替用户读取、复制或持久化登录令牌，也不得静默切换到另一个 CLI。
 
 Ollama 模式还要检查模型是否存在：
 

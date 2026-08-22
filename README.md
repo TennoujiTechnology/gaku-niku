@@ -40,6 +40,8 @@ GakuNiku 是一个本地运行的视频字幕翻译工具，当前重点支持�
 
 任务开始后会依次执行素材获取、背景预习、原文听写、翻译、疑点复核、字幕质检、视频封装和最终验证。
 
+第一步不是单纯保存一个“翻译模型”。通过文字与图片测试的模型会成为本次任务的统一执行模型：第二步发现本地听写环境缺失时，它先读取程序生成的脱敏诊断，再通过内置 Harness 选择安全安装方案；开始任务后，同一个模型继续负责检索规划、翻译、疑点复核和质量判断。API 模式不需要 Codex、Claude Code 或其他 Agent CLI，项目自带的 Harness 负责白名单文件、媒体和检索工具调用。
+
 ### Agent Skill
 
 如果本机已经安装 Codex、Claude Code 或其他能够加载 Skill 的 Agent，可以直接使用 [`skills/gaku-niku/`](./skills/gaku-niku/)。这种方式保留完整执行上下文，更适合需要 Agent 参与判断和修订的任务。
@@ -81,9 +83,11 @@ npm run dev
 
 ## 模型与听写
 
-API 模式提供 GPT、Grok、DeepSeek、Kimi、MiMo、MiniMax、GLM 及 OpenAI 兼容接口的预设。模型列表可使用当前密钥从服务商接口同步。
+API 模式提供 GPT、Grok、DeepSeek、Kimi、MiMo、MiniMax、GLM 及 OpenAI 兼容接口的预设。模型列表可使用当前密钥从服务商接口同步。选中的 API 直接驱动项目自带 Harness，不会在后台寻找 Codex 或 Claude Code。
 
-Agent 模式提供 Codex、Claude Code、OpenCode、Pi、Cline 等适配器，并复用用户已有的本地登录状态。
+Agent Skill 模式提供 Codex、Claude Code、OpenCode、Pi、Cline 等适配器，并严格使用用户在第一步明确选择的 CLI 及其登录状态，不会静默换成另一种 CLI。
+
+本地部署模型使用 Ollama 的 OpenAI 兼容接口直连同一套内置 Harness，同样不要求额外 Agent CLI。
 
 原文听写和翻译使用两套独立配置：
 

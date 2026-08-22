@@ -1750,6 +1750,57 @@ export function SubtitleStudio() {
     }
   }
 
+  async function autoPrepareTranscriptionWithSelectedEngine() {
+    if (!engineVerified || !transcriptionEnvironmentRoot.trim() || transcriptionInstallBusy) return;
+    const pending = transcriptionEnvironment?.resources?.pendingDownloadLabel || transcriptionEnvironment?.resources?.downloadLabel || "所需依赖与模型";
+    if (!window.confirm(`将由第一步已验证的 ${activeEngineLabel} 分析当前检查结果，并允许 GakuNiku 在所选项目数据文件夹中下载 ${pending}。程序只执行内置白名单安装动作，不执行模型生成的命令。是否继续？`)) return;
+    setTranscriptionInstallBusy(true);
+    setTranscriptionCheckError("");
+    setTranscriptionDiagnosis("");
+    setTranscriptionInstallEvents([]);
+    setTranscriptionInstallStage("第一步模型正在分析环境");
+    setTranscriptionInstallProgress(2);
+    try {
+      const response = await fetch(`${BRIDGE_URL}/api/transcription/auto-install`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          engine: enginePayload(),
+          transcription: { ...transcriptionPayload(), confirmed: true },
+        }),
+      });
+      const created = await response.json();
+      if (!response.ok) throw new Error(created.error || "无法启动模型自动配置");
+      let complete = false;
+      while (!complete) {
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        const statusResponse = await fetch(`${BRIDGE_URL}/api/transcription/operations/${created.id}`);
+        const status = await statusResponse.json();
+        if (!statusResponse.ok) throw new Error(status.error || "无法读取自动配置进度");
+        setTranscriptionInstallStage(status.stage || "模型正在配置环境");
+        setTranscriptionInstallProgress(Number(status.progress || 0));
+        setTranscriptionInstallEvents(Array.isArray(status.events) ? status.events : []);
+        if (status.status === "completed") {
+          complete = true;
+          const applied = status.result?.appliedTranscription;
+          if (applied) {
+            setTranscriptionDiarization(Boolean(applied.diarization));
+            if (applied.diarizationEngine === "pyannote" || applied.diarizationEngine === "sherpa_onnx") setTranscriptionDiarizationEngine(applied.diarizationEngine);
+          }
+          setTranscriptionEnvironment(status.result || null);
+          setTranscriptionInstallProgress(100);
+          setTranscriptionDiagnosis(status.result?.modelPlan?.explanation || "第一步模型已完成最小环境配置并通过程序校验");
+        } else if (status.status === "failed") {
+          throw new Error(status.error || "模型自动配置失败");
+        }
+      }
+    } catch (error) {
+      setTranscriptionCheckError(error instanceof Error ? error.message : "模型自动配置失败");
+    } finally {
+      setTranscriptionInstallBusy(false);
+    }
+  }
+
   async function testTranscriptionWithSample() {
     setTranscriptionTestStage("running");
     setTranscriptionTestDetail("正在准备约 20 秒的真实音频…");
@@ -2529,7 +2580,7 @@ export function SubtitleStudio() {
       setJobRunStatus("running");
       setActiveJobConsentFingerprint(taskExternalProcessingConsent?.fingerprint || "");
       window.localStorage.setItem(ACTIVE_JOB_STORE, JSON.stringify({ id: data.id, source, savedAt: new Date().toISOString() }));
-      setRunMessage("任务已交给本地 Agent");
+      setRunMessage(engineMode === "api" ? "任务已交给首页模型与项目内置 Harness" : "任务已交给所选 Agent Skill");
     } catch (error) {
       setWorkspace("prepare");
       setRunError(error instanceof Error ? error.message : "任务创建失败");
@@ -2976,7 +3027,7 @@ export function SubtitleStudio() {
               </div>
               <p className="panel-intro">相同的已验证配置会自动沿用；只有模型、密钥或思考强度发生变化时才重新测试。</p>
               <div className="engine-mode-cards" aria-label="翻译引擎运行方式">
-                <button className={engineMode === "api" ? "active" : ""} onClick={() => { chooseStudioMode("easy"); setEngineMode("api"); if (searchProvider === "builtin") chooseSearchProvider("exa"); invalidateEngineTest(); }}><span><Gauge size={21} /></span><div><strong>API 模式</strong><small>简单稳定 · 大多数用户推荐</small></div>{engineMode === "api" && <CheckCircle size={19} weight="fill" />}</button>
+                <button className={engineMode === "api" ? "active" : ""} onClick={() => { chooseStudioMode("easy"); setEngineMode("api"); if (searchProvider === "builtin") chooseSearchProvider("exa"); invalidateEngineTest(); }}><span><Gauge size={21} /></span><div><strong>API 模式</strong><small>无需 Agent CLI · 模型直连内置 Harness</small></div>{engineMode === "api" && <CheckCircle size={19} weight="fill" />}</button>
                 <button className={engineMode === "cli" ? "active" : ""} onClick={() => { chooseStudioMode("advanced"); setEngineMode("cli"); invalidateEngineTest(); }}><span><Robot size={22} /></span><div><strong>Agent Skill</strong><small>专业模式 · 调用本地 Agent</small></div>{engineMode === "cli" && <CheckCircle size={19} weight="fill" />}</button>
               </div>
               <div className="engine-advanced-row"><button className={studioMode === "advanced" ? "active" : ""} onClick={() => chooseStudioMode(studioMode === "advanced" ? "easy" : "advanced")}><SlidersHorizontal size={15} />{studioMode === "advanced" ? "收起高级设置" : "展开高级设置"}</button>{studioMode === "advanced" && <button className={engineMode === "gpu" ? "active" : ""} onClick={() => { setEngineMode("gpu"); invalidateEngineTest(); }}><Brain size={15} />本地部署模型</button>}</div>
@@ -3154,7 +3205,7 @@ export function SubtitleStudio() {
                         </div>
                       </section>}
                       {transcriptionEnvironment.diagnostics && !transcriptionEnvironment.diagnostics.healthy && <section className="transcription-diagnostics">
-                        <div className="transcription-diagnostics-heading"><div><span>FAILURE ANALYSIS</span><strong>本次配置为什么没有完成</strong><small>{transcriptionEnvironment.diagnostics.summary}</small></div><button type="button" onClick={askModelToDiagnoseTranscription} disabled={!engineVerified || transcriptionDiagnosisBusy}>{transcriptionDiagnosisBusy ? "模型正在分析…" : engineVerified ? "让第一步模型辅助分析" : "模型测试通过后可辅助分析"}</button></div>
+                        <div className="transcription-diagnostics-heading"><div><span>FAILURE ANALYSIS</span><strong>本次配置为什么没有完成</strong><small>{transcriptionEnvironment.diagnostics.summary}</small></div><div className="transcription-diagnostics-actions"><button type="button" className="primary" onClick={() => void autoPrepareTranscriptionWithSelectedEngine()} disabled={!engineVerified || transcriptionInstallBusy || !transcriptionEnvironmentRoot.trim()}>{transcriptionInstallBusy ? transcriptionInstallStage || "正在配置…" : engineVerified ? "让第一步模型自动配置" : "先通过模型测试"}</button><button type="button" onClick={askModelToDiagnoseTranscription} disabled={!engineVerified || transcriptionDiagnosisBusy}>{transcriptionDiagnosisBusy ? "模型正在分析…" : "只分析原因"}</button></div></div>
                         <div className="transcription-diagnostic-issues">{transcriptionEnvironment.diagnostics.issues.map((issue) => <article key={issue.id}><i>!</i><div><strong>{issue.label}</strong><p>{issue.detail}</p><small>{issue.repair}</small></div></article>)}</div>
                         <p className="transcription-ai-safety">模型只读取脱敏检查结果并解释原因，不会生成或执行安装命令；修复仍由固定的安全安装流程完成。</p>
                         {transcriptionDiagnosis && <div className="transcription-ai-advice"><span>MODEL ADVICE</span><p>{transcriptionDiagnosis}</p></div>}

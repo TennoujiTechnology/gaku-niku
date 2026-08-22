@@ -7,6 +7,16 @@ description: "Research-grounded, end-to-end video subtitle localization for Bili
 
 Produce a research-backed translation and a verified playable deliverable. Default to Japanese-to-Simplified-Chinese unless the user specifies other languages.
 
+## Studio execution ownership
+
+- The model that passed the Studio step-one text-and-image test is the one execution and semantic authority for the task, including step-two environment planning and every later workflow phase.
+- In API mode, run through the bundled Built-in Harness and the selected API directly. Never probe, launch, or depend on Codex, Claude Code, OpenCode, Cline, or another Agent CLI as a hidden orchestrator.
+- In local-model mode, connect the selected Ollama model directly to the same Built-in Harness. Do not borrow an Agent CLI as an orchestrator.
+- In Agent Skill mode, invoke only the CLI explicitly selected and tested by the user. Do not silently substitute a different CLI.
+- The Built-in Harness exposes a fixed allowlist of file, search, selected-model, ASR/OCR, media, subtitle, and atomic-manifest tools. Never request arbitrary shell, arbitrary code execution, deletion, credential access, or paths outside the authorized job/source/output roots.
+- For environment setup, reason only from the Studio's real redacted diagnostics and select among its declared safe actions. Required base-ASR repairs cannot be omitted. Optional diarization may switch to ungated Sherpa-ONNX or be disabled; a failed optional enhancement must not destroy or replace a working base environment.
+- Log every decision, tool call, failure, fallback, and gate result. Never put API keys, tokens, cookies, or full media into prompts or logs.
+
 ## Non-negotiable rules
 
 1. Use only media the user supplied or is authorized to access. Do not bypass DRM, paywalls, or access controls.
@@ -38,7 +48,7 @@ python3 {skill_dir}/scripts/check_environment.py SOURCE --strict
 
 Use the generated `manifest.json` as the single progress record. Update each phase from `pending` to `in_progress` to `complete`, recording paths and evidence. A failed phase remains `blocked`; do not skip it silently.
 
-Before launching the long-running Agent, complete the Studio transcription preflight and persist its structured result in `manifest.transcription_preflight`: execute FFmpeg/FFprobe on a bounded audio sample, run the selected Faster-Whisper model from the selected cache, and run the selected diarization engine on 16 kHz mono PCM audio. Prefer the Studio-managed Sherpa-ONNX runtime and verified local segmentation/embedding models; it requires no account. WhisperX / pyannote may be used only when explicitly selected and authorized. If either optional route fails, disable diarization for this task immediately and continue base ASR with `speaker_unknown`; do not enter an Agent retry loop.
+Before launching the long-running Harness runner, complete the Studio transcription preflight and persist its structured result in `manifest.transcription_preflight`: execute FFmpeg/FFprobe on a bounded audio sample, run the selected Faster-Whisper model from the selected cache, and run the selected diarization engine on 16 kHz mono PCM audio. Prefer the Studio-managed Sherpa-ONNX runtime and verified local segmentation/embedding models; it requires no account. WhisperX / pyannote may be used only when explicitly selected and authorized. If either optional route fails, disable diarization for this task immediately and continue base ASR with `speaker_unknown`; do not enter a retry loop.
 
 ## Workflow
 

@@ -23787,6 +23787,56 @@
         setTranscriptionDiagnosisBusy(false);
       }
     }
+    async function autoPrepareTranscriptionWithSelectedEngine() {
+      if (!engineVerified || !transcriptionEnvironmentRoot.trim() || transcriptionInstallBusy) return;
+      const pending = transcriptionEnvironment?.resources?.pendingDownloadLabel || transcriptionEnvironment?.resources?.downloadLabel || "\u6240\u9700\u4F9D\u8D56\u4E0E\u6A21\u578B";
+      if (!window.confirm(`\u5C06\u7531\u7B2C\u4E00\u6B65\u5DF2\u9A8C\u8BC1\u7684 ${activeEngineLabel} \u5206\u6790\u5F53\u524D\u68C0\u67E5\u7ED3\u679C\uFF0C\u5E76\u5141\u8BB8 GakuNiku \u5728\u6240\u9009\u9879\u76EE\u6570\u636E\u6587\u4EF6\u5939\u4E2D\u4E0B\u8F7D ${pending}\u3002\u7A0B\u5E8F\u53EA\u6267\u884C\u5185\u7F6E\u767D\u540D\u5355\u5B89\u88C5\u52A8\u4F5C\uFF0C\u4E0D\u6267\u884C\u6A21\u578B\u751F\u6210\u7684\u547D\u4EE4\u3002\u662F\u5426\u7EE7\u7EED\uFF1F`)) return;
+      setTranscriptionInstallBusy(true);
+      setTranscriptionCheckError("");
+      setTranscriptionDiagnosis("");
+      setTranscriptionInstallEvents([]);
+      setTranscriptionInstallStage("\u7B2C\u4E00\u6B65\u6A21\u578B\u6B63\u5728\u5206\u6790\u73AF\u5883");
+      setTranscriptionInstallProgress(2);
+      try {
+        const response = await fetch(`${BRIDGE_URL}/api/transcription/auto-install`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            engine: enginePayload(),
+            transcription: { ...transcriptionPayload(), confirmed: true }
+          })
+        });
+        const created = await response.json();
+        if (!response.ok) throw new Error(created.error || "\u65E0\u6CD5\u542F\u52A8\u6A21\u578B\u81EA\u52A8\u914D\u7F6E");
+        let complete = false;
+        while (!complete) {
+          await new Promise((resolve) => window.setTimeout(resolve, 900));
+          const statusResponse = await fetch(`${BRIDGE_URL}/api/transcription/operations/${created.id}`);
+          const status = await statusResponse.json();
+          if (!statusResponse.ok) throw new Error(status.error || "\u65E0\u6CD5\u8BFB\u53D6\u81EA\u52A8\u914D\u7F6E\u8FDB\u5EA6");
+          setTranscriptionInstallStage(status.stage || "\u6A21\u578B\u6B63\u5728\u914D\u7F6E\u73AF\u5883");
+          setTranscriptionInstallProgress(Number(status.progress || 0));
+          setTranscriptionInstallEvents(Array.isArray(status.events) ? status.events : []);
+          if (status.status === "completed") {
+            complete = true;
+            const applied = status.result?.appliedTranscription;
+            if (applied) {
+              setTranscriptionDiarization(Boolean(applied.diarization));
+              if (applied.diarizationEngine === "pyannote" || applied.diarizationEngine === "sherpa_onnx") setTranscriptionDiarizationEngine(applied.diarizationEngine);
+            }
+            setTranscriptionEnvironment(status.result || null);
+            setTranscriptionInstallProgress(100);
+            setTranscriptionDiagnosis(status.result?.modelPlan?.explanation || "\u7B2C\u4E00\u6B65\u6A21\u578B\u5DF2\u5B8C\u6210\u6700\u5C0F\u73AF\u5883\u914D\u7F6E\u5E76\u901A\u8FC7\u7A0B\u5E8F\u6821\u9A8C");
+          } else if (status.status === "failed") {
+            throw new Error(status.error || "\u6A21\u578B\u81EA\u52A8\u914D\u7F6E\u5931\u8D25");
+          }
+        }
+      } catch (error) {
+        setTranscriptionCheckError(error instanceof Error ? error.message : "\u6A21\u578B\u81EA\u52A8\u914D\u7F6E\u5931\u8D25");
+      } finally {
+        setTranscriptionInstallBusy(false);
+      }
+    }
     async function testTranscriptionWithSample() {
       setTranscriptionTestStage("running");
       setTranscriptionTestDetail("\u6B63\u5728\u51C6\u5907\u7EA6 20 \u79D2\u7684\u771F\u5B9E\u97F3\u9891\u2026");
@@ -24513,7 +24563,7 @@
         setJobRunStatus("running");
         setActiveJobConsentFingerprint(taskExternalProcessingConsent?.fingerprint || "");
         window.localStorage.setItem(ACTIVE_JOB_STORE, JSON.stringify({ id: data.id, source, savedAt: (/* @__PURE__ */ new Date()).toISOString() }));
-        setRunMessage("\u4EFB\u52A1\u5DF2\u4EA4\u7ED9\u672C\u5730 Agent");
+        setRunMessage(engineMode === "api" ? "\u4EFB\u52A1\u5DF2\u4EA4\u7ED9\u9996\u9875\u6A21\u578B\u4E0E\u9879\u76EE\u5185\u7F6E Harness" : "\u4EFB\u52A1\u5DF2\u4EA4\u7ED9\u6240\u9009 Agent Skill");
       } catch (error) {
         setWorkspace("prepare");
         setRunError(error instanceof Error ? error.message : "\u4EFB\u52A1\u521B\u5EFA\u5931\u8D25");
@@ -25029,7 +25079,7 @@
                   /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(n, { size: 21 }) }),
                   /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
                     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "API \u6A21\u5F0F" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u7B80\u5355\u7A33\u5B9A \xB7 \u5927\u591A\u6570\u7528\u6237\u63A8\u8350" })
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u65E0\u9700 Agent CLI \xB7 \u6A21\u578B\u76F4\u8FDE\u5185\u7F6E Harness" })
                   ] }),
                   engineMode === "api" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(s2, { size: 19, weight: "fill" })
                 ] }),
@@ -25573,7 +25623,10 @@
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u672C\u6B21\u914D\u7F6E\u4E3A\u4EC0\u4E48\u6CA1\u6709\u5B8C\u6210" }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionEnvironment.diagnostics.summary })
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: askModelToDiagnoseTranscription, disabled: !engineVerified || transcriptionDiagnosisBusy, children: transcriptionDiagnosisBusy ? "\u6A21\u578B\u6B63\u5728\u5206\u6790\u2026" : engineVerified ? "\u8BA9\u7B2C\u4E00\u6B65\u6A21\u578B\u8F85\u52A9\u5206\u6790" : "\u6A21\u578B\u6D4B\u8BD5\u901A\u8FC7\u540E\u53EF\u8F85\u52A9\u5206\u6790" })
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-diagnostics-actions", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void autoPrepareTranscriptionWithSelectedEngine(), disabled: !engineVerified || transcriptionInstallBusy || !transcriptionEnvironmentRoot.trim(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u914D\u7F6E\u2026" : engineVerified ? "\u8BA9\u7B2C\u4E00\u6B65\u6A21\u578B\u81EA\u52A8\u914D\u7F6E" : "\u5148\u901A\u8FC7\u6A21\u578B\u6D4B\u8BD5" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: askModelToDiagnoseTranscription, disabled: !engineVerified || transcriptionDiagnosisBusy, children: transcriptionDiagnosisBusy ? "\u6A21\u578B\u6B63\u5728\u5206\u6790\u2026" : "\u53EA\u5206\u6790\u539F\u56E0" })
+                            ] })
                           ] }),
                           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "transcription-diagnostic-issues", children: transcriptionEnvironment.diagnostics.issues.map((issue) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", { children: [
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "!" }),

@@ -14,7 +14,9 @@
 - 对应平台的 uv 0.11.29 工具链
 - Precision harness、可独立安装的 GakuNiku Skill、固定依赖清单和 API 计费清单
 
-Python 3.11、Faster-Whisper、WhisperX 与模型权重仍由界面在用户确认后安装到所选目录；这样可以按需选择质量，并避免首次下载前就占用数 GB。Agent CLI 继续复用用户自己安装和登录的 Codex、Claude Code、OpenCode、Pi、Cline 等工具，不会复制账号凭据。
+Python 3.11、Faster-Whisper、可选说话人分离组件与模型权重由界面在用户确认后安装到所选目录；这样可以按需选择质量，并避免首次下载前就占用数 GB。第二步可以点击“让第一步模型自动配置”：程序先做真实环境检查，把脱敏结果交给第一步已验证的模型，再由项目内置 Harness 执行固定白名单内的安装动作。
+
+使用 API 或本地部署模型时不需要安装 Codex、Claude Code 等 Agent CLI；所选模型会直接驱动包内 Harness 完成后续流程。只有主动选择“Agent Skill”模式时，才会复用用户自己安装并登录的 Codex、Claude Code、OpenCode、Pi 或 Cline，且不会复制账号凭据。
 
 ## 测试版提醒
 

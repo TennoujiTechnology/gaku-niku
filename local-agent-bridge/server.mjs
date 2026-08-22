@@ -20,6 +20,7 @@ const projectRoot = path.resolve(bridgeDirectory, "..");
 const staticRoot = path.join(projectRoot, "standalone");
 const harnessPath = path.join(projectRoot, "harness", "precision-video-subtitles", "SKILL.md");
 const apiHelperPath = path.join(bridgeDirectory, "api-model-call.mjs");
+const builtinHarnessRunnerPath = path.join(bridgeDirectory, "builtin-harness-runner.mjs");
 const manifestHelperPath = path.join(bridgeDirectory, "manifest-update.mjs");
 const whisperxPreflightPath = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "preflight_whisperx.py");
 const sherpaDiarizationPath = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "diarize_sherpa_onnx.py");
@@ -1498,6 +1499,116 @@ function startTranscriptionInstall(input) {
   return operation;
 }
 
+async function runModelAssistedTranscriptionInstall(operation, engine, input) {
+  let effective = { ...input };
+  let plan = null;
+  try {
+    operationStep(operation, "模型分析环境", 4, "第一步选定的模型正在读取脱敏检查结果，并从安全安装动作中选择最小方案");
+    const environment = await transcriptionEnvironment(input);
+    const repairs = environment.diagnostics?.repairComponents || {};
+    if (environment.ready) {
+      operation.status = "completed";
+      operation.progress = 100;
+      operation.result = { ...environment, modelPlan: { action: "reuse", explanation: "现有环境已经通过检查，无需重复安装" }, appliedTranscription: effective };
+      appendTranscriptionEvent(operation, "完成", "第一步模型确认现有环境可以直接复用", "done");
+      return;
+    }
+    const safeReport = redactLocalDiagnostic({
+      platform: currentRuntimePlatform,
+      transcription: {
+        provider: input.provider,
+        model: input.model,
+        quality: input.quality,
+        diarization: Boolean(input.diarization),
+        diarizationEngine: diarizationEngine(input),
+        hasHuggingFaceToken: Boolean(String(input.hfToken || "").trim()),
+      },
+      diagnostics: environment.diagnostics,
+      components: environment.components,
+      resources: environment.resources,
+      installationCapabilities: environment.installationCapabilities,
+    });
+    const prompt = `你是 GakuNiku 内置环境 Harness 的规划模型。根据脱敏报告选择最小安全配置；程序只会执行固定白名单动作，不能执行 shell。只返回一行 JSON：{"action":"prepare","runtime":true|false,"model":true|false,"diarization":"sherpa_onnx|pyannote|off","explanation":"不超过160字"}。规则：缺少基础运行库或模型时必须补齐；默认优先无需账号权限的 sherpa_onnx；只有报告明确已有 Hugging Face Token 且用户选择 pyannote 时才选 pyannote；内存或权限不足时可把可选说话人分离设为 off，但不能关闭基础听写。\n\n${JSON.stringify(safeReport)}`;
+    try {
+      const answer = await selectedEngineText(engine, prompt, { maxTokens: 700, timeoutMs: 120_000 });
+      const parsed = parseStructuredReply(answer.text);
+      plan = {
+        action: "prepare",
+        runtime: Boolean(parsed.runtime),
+        model: Boolean(parsed.model),
+        diarization: ["sherpa_onnx", "pyannote", "off"].includes(parsed.diarization) ? parsed.diarization : "off",
+        explanation: String(parsed.explanation || "已根据环境检查选择最小配置").slice(0, 500),
+        modelLabel: answer.label,
+        tokenUsage: answer.tokenUsage,
+      };
+    } catch (error) {
+      plan = {
+        action: "prepare",
+        runtime: Boolean(repairs.runtime),
+        model: Boolean(repairs.model),
+        diarization: input.diarization ? (diarizationEngine(input) === "pyannote" && !String(input.hfToken || "").trim() ? "sherpa_onnx" : diarizationEngine(input)) : "off",
+        explanation: `模型规划暂时不可用，已按内置 Harness 的保守方案继续：${error instanceof Error ? error.message : String(error)}`.slice(0, 500),
+        fallback: true,
+      };
+      appendTranscriptionEvent(operation, "模型分析环境", plan.explanation, "warning");
+    }
+    // Mandatory repairs always win over a model omission. The model can only
+    // choose optional enhancements, never disable a required dependency.
+    const components = {
+      runtime: Boolean(repairs.runtime || plan.runtime),
+      model: Boolean(repairs.model || plan.model),
+      diarization: Boolean(repairs.diarization && plan.diarization !== "off"),
+    };
+    if (plan.diarization === "pyannote" && !String(input.hfToken || "").trim()) {
+      plan.diarization = "sherpa_onnx";
+      plan.explanation = `${plan.explanation}；pyannote 未提供权限令牌，已改用无需账号授权的 Sherpa-ONNX`;
+    }
+    effective = {
+      ...input,
+      confirmed: true,
+      components,
+      diarization: plan.diarization !== "off",
+      diarizationEngine: plan.diarization === "off" ? diarizationEngine(input) : plan.diarization,
+    };
+    operation.modelPlan = plan;
+    appendTranscriptionEvent(operation, "模型配置方案", `${plan.explanation}（运行库 ${components.runtime ? "准备" : "复用"} · 模型 ${components.model ? "准备" : "复用"} · 说话人分离 ${effective.diarization ? effective.diarizationEngine : "关闭"}）`, "done");
+    if (!components.runtime && !components.model && !components.diarization) {
+      const result = await transcriptionEnvironment(effective);
+      operation.status = "completed";
+      operation.progress = 100;
+      operation.result = { ...result, modelPlan: plan, appliedTranscription: effective };
+      return;
+    }
+    await runTranscriptionInstall(operation, effective);
+    if (operation.result) operation.result = { ...operation.result, modelPlan: plan, appliedTranscription: effective };
+  } catch (error) {
+    operation.status = "failed";
+    operation.error = error instanceof Error ? error.message : String(error);
+    appendTranscriptionEvent(operation, "失败", operation.error, "error");
+    operation.finishedAt = new Date().toISOString();
+  } finally {
+    const lockRoot = transcriptionInstallLockRoots.get(operation.id);
+    if (lockRoot && activeTranscriptionInstallRoots.get(lockRoot) === operation.id) activeTranscriptionInstallRoots.delete(lockRoot);
+    transcriptionInstallLockRoots.delete(operation.id);
+  }
+}
+
+function startModelAssistedTranscriptionInstall(engine, input) {
+  if (!engine?.mode) throw new Error("请先通过第一步的模型测试");
+  if (input.provider !== "faster_whisper" || input.mode !== "local") throw new Error("模型自动配置当前支持本地 Faster-Whisper；在线听写无需安装本地环境");
+  if (input.confirmed !== true) throw new Error("请先确认允许下载依赖和模型到所选项目数据文件夹");
+  if (!String(input.environmentRoot || "").trim()) throw new Error("请先确认模型与项目数据文件夹");
+  const lockRoot = transcriptionPaths(input).runtimeRoot;
+  if (activeTranscriptionInstallRoots.has(lockRoot)) throw new Error("这个项目环境已经在配置中，请等待当前进度完成");
+  const id = randomUUID();
+  const operation = { id, type: "model-assisted-install", status: "running", stage: "模型分析环境", progress: 2, events: [], createdAt: new Date().toISOString() };
+  activeTranscriptionInstallRoots.set(lockRoot, id);
+  transcriptionInstallLockRoots.set(id, lockRoot);
+  transcriptionOperations.set(id, operation);
+  void runModelAssistedTranscriptionInstall(operation, engine, input);
+  return operation;
+}
+
 function sourceKind(value) {
   const source = String(value || "").trim();
   if (/bilibili\.com|b23\.tv/i.test(source)) return "bilibili";
@@ -2665,14 +2776,14 @@ function buildPrompt(config, jobDirectory, context = {}) {
     ] : []),
     ...(context.knowledgePaths?.length ? [`用户调取的本地知识库文档: ${context.knowledgePaths.join(", ")}。知识库是线索，冲突时以当前官方来源为准。`] : []),
     ...(config.engine?.mode === "api" ? [
-      `用户在第一步指定并验证的研究/翻译模型: ${config.engine.provider}/${config.engine.model}。本地 Agent 只负责工具编排；检索词规划、结果筛选、证据归纳、语义判断与每批翻译必须调用用户所选模型，不得用 Codex、Claude 或其他编排模型替代。`,
-      `调用方法: 先写 JSON 输入文件 {"messages":[{"role":"system","content":"..."},{"role":"user","content":"..."}]}，再运行 node ${apiHelperPath} 输入文件 输出文件；读取输出 JSON 的 text 字段。按段调用，单次输入不超过 2 MB。`,
-      `翻译批次必须使用自适应协议：输入 JSON 提供 batchItems、batchInstruction、batchSystem、estimatedOutputTokensPerItem 与 maxTokens；${apiHelperPath} 会在预计接近输出上限前自动缩小批次，并且仅对超限子批次二分重试。读取输出的 parts，按每项稳定 id 合并；禁止因一个子批次超限而重新生成整批或整份字幕。`,
+      `用户在第一步指定并验证的统一执行模型: ${config.engine.provider}/${config.engine.model}。它直接负责环境纠错、检索规划、结果筛选、证据归纳、语义判断、逐批翻译、疑点复核与最终判断；项目内置 Harness 只执行白名单文件/媒体/搜索工具。不得启动、探测或依赖 Codex、Claude、OpenCode、Cline 等外部 Agent CLI。`,
+      `当前运行器: ${builtinHarnessRunnerPath}。所有动作必须使用它提供的结构化工具协议；不得要求任意 shell、任意脚本或未授权路径。需要再次进行语义处理、图片 OCR 或自适应批处理时，仍调用同一个首页模型。`,
+      `翻译批次必须使用内置 model_batch 自适应协议；它会在预计接近输出上限前缩小批次，并且只对超限子批次二分重试。禁止因一个子批次超限而重新生成整批或整份字幕。`,
       "稳定性约束: 模型与检索的完整输入/输出必须留在磁盘文件，禁止在命令后追加 cat、完整 jq -r .text 或循环打印整份结果。每次终端回显控制在 4 KB 内，只查看必要字段、计数或分段摘要；需要转换大 JSON 时直接由脚本读写文件。不得把大段工具输出回灌给编排 Agent。",
     ] : []),
     ...(config.engine?.mode === "gpu" ? [
-      `用户在第一步指定并验证的研究/翻译模型: Ollama/${config.engine.gpuModel || config.engine.model}。本地 Agent 只负责工具编排；检索词规划、结果筛选、证据归纳、语义判断与每批翻译必须通过 Ollama 调用该模型，不得用 Codex、Claude 或其他编排模型替代。`,
-      "调用本地模型时使用磁盘分批输入，控制上下文大小，避免一次载入整份转写或视频。",
+      `用户在第一步指定并验证的统一执行模型: Ollama/${config.engine.gpuModel || config.engine.model}。它通过项目内置 Harness 直接负责环境纠错、检索规划、结果筛选、证据归纳、语义判断、逐批翻译、疑点复核与最终判断；不得启动、探测或依赖 Codex、Claude 或其他外部 Agent CLI。`,
+      `当前运行器: ${builtinHarnessRunnerPath}。调用本地模型时使用磁盘分批输入，控制上下文大小，避免一次载入整份转写或视频。`,
     ] : []),
     "字幕硬约束: 每个逻辑字幕最多两行；充分利用横向安全区；对话型中文字幕默认不在每条末尾添加句号‘。’，但保留句中的句号以及必要的问号、感叹号、省略号和破折号；从该人开口的第一个词出现，到最后一个词结束时消失；可靠角色色用于外圈描边、柔光和投影；不可靠时使用确定性随机色并记录；疑点先分级，只有画面文字确实可能解疑时才抽帧/OCR。",
     "人物实体硬约束: 一个角色及其对应声优/出演者只能生成一个人物实体。roles 中同时保存 characterName、performerName 与 speakingAs；动画/剧情角色对白使用 speakingAs=character，访谈、舞台、广播或活动中本人发言使用 speakingAs=performer，证据不足用 unknown。name 必须等于当前发言身份对应的名字。不得把角色名和声优名拆成两个 role，也不得把作品名、组合名、活动名或匿名聚类标签当成人物。",
@@ -2686,9 +2797,10 @@ function buildPrompt(config, jobDirectory, context = {}) {
 function adapter(config) {
   const mode = config.engine?.mode || "cli";
   let name = config.engine?.cli || "codex";
-  if (mode === "gpu") name = executable("codex") ? "codex" : "claude";
-  if (mode === "api") name = executable("codex") ? "codex" : "claude";
-  const command = executable(name);
+  if (mode === "gpu") name = "builtin-local";
+  if (mode === "api") name = "builtin-api";
+  const builtinHarness = name === "builtin-api" || name === "builtin-local";
+  const command = builtinHarness ? process.execPath : executable(name);
   if (!command) throw new Error(`本机没有发现 ${name}，请先安装或改用其他 Agent。`);
   const extraToolDirectories = [executable("uvx"), executable("yutto")].filter(Boolean).map((value) => path.dirname(value));
   const env = { ...process.env, PATH: [...new Set(extraToolDirectories), process.env.PATH || ""].filter(Boolean).join(path.delimiter) };
@@ -2706,11 +2818,29 @@ function adapter(config) {
       env.OPENAI_API_KEY = key;
       env.OPENAI_BASE_URL = preset.baseUrl;
     }
+    const selectedSearch = searchConfig(config.search || { provider: "exa" });
+    if (selectedSearch.provider === "builtin") throw new Error("API 模式不能使用 Agent 内置搜索；请选择 Exa、Tavily 或自定义 MCP，内置 Harness 会直接调用它。 ");
+    if (!selectedSearch.url) throw new Error("API 模式需要填写联网搜索 MCP 地址。 ");
+    env.PSS_SEARCH_PROVIDER = selectedSearch.provider;
+    env.PSS_SEARCH_MCP_URL = selectedSearch.url;
+    env.PSS_SEARCH_PROXY_URL = selectedSearch.proxyUrl || "";
+    if (selectedSearch.apiKey) env.PSS_SEARCH_MCP_KEY = selectedSearch.apiKey;
   }
   if (mode === "gpu") {
+    env.PSS_API_KEY = "ollama-local";
+    env.PSS_API_PROVIDER = "compatible";
+    env.PSS_API_BASE_URL = String(config.engine?.ollamaBaseUrl || "http://127.0.0.1:11434/v1").replace(/\/$/, "");
+    env.PSS_API_MODEL = String(config.engine.gpuModel || config.engine.model || "deepseek-r1:14b");
     env.PSS_LOCAL_MODEL_PROVIDER = "ollama";
     env.PSS_LOCAL_MODEL = String(config.engine.gpuModel || config.engine.model || "deepseek-r1:14b");
     env.PSS_REASONING_EFFORT = String(config.engine.reasoning || "medium");
+    const selectedSearch = searchConfig(config.search || { provider: "exa" });
+    if (selectedSearch.provider === "builtin") throw new Error("本地部署模型不能使用 Agent 内置搜索；请选择 Exa、Tavily 或自定义 MCP，内置 Harness 会直接调用它。 ");
+    if (!selectedSearch.url) throw new Error("本地部署模型需要填写联网搜索 MCP 地址。 ");
+    env.PSS_SEARCH_PROVIDER = selectedSearch.provider;
+    env.PSS_SEARCH_MCP_URL = selectedSearch.url;
+    env.PSS_SEARCH_PROXY_URL = selectedSearch.proxyUrl || "";
+    if (selectedSearch.apiKey) env.PSS_SEARCH_MCP_KEY = selectedSearch.apiKey;
   }
   if (config.transcription?.mode === "api") {
     const transcriptionKey = String(config.transcription.apiKey || "").trim();
@@ -2723,9 +2853,10 @@ function adapter(config) {
   return { name, command, env };
 }
 
-function adapterArguments(name, config, prompt, searchAgentConfig = { codexArgs: [], claudeArgs: [] }) {
+function adapterArguments(name, config, prompt, searchAgentConfig = { codexArgs: [], claudeArgs: [] }, context = {}) {
   const modelArgs = config.engine?.mode !== "api" && config.engine?.model ? ["--model", config.engine.model] : [];
   const reasoning = config.engine?.reasoning || "medium";
+  if (name === "builtin-api" || name === "builtin-local") return [builtinHarnessRunnerPath, "--job-dir", context.jobDirectory, "--prompt", context.promptPath];
   if (name === "codex") return [...searchAgentConfig.codexArgs, "exec", "--ephemeral", "--json", "--skip-git-repo-check", "--disable", "plugins", "--disable", "apps", "--disable", "tool_suggest", "-c", `model_reasoning_effort="${reasoning}"`, ...modelArgs, prompt];
   if (name === "claude") return ["-p", prompt, ...modelArgs, "--effort", reasoning, "--output-format", "stream-json", "--verbose", ...searchAgentConfig.claudeArgs];
   if (name === "opencode") return ["run", "--format", "json", ...(config.engine?.model ? ["--model", config.engine.model] : []), prompt];
@@ -2886,11 +3017,13 @@ async function launchJob(inputConfig) {
     }
     if (config.transcription?.diarization && diarizationEngine(config.transcription) === "pyannote" && String(config.transcription?.hfToken || "").trim()) selected.env.HF_TOKEN = String(config.transcription.hfToken).trim();
   }
-  const args = adapterArguments(selected.name, config, prompt, searchAgentConfig);
+  const runnerPromptPath = path.join(jobDirectory, "work", "builtin-harness-prompt.md");
+  await writeFile(runnerPromptPath, prompt, "utf8");
+  const args = adapterArguments(selected.name, config, prompt, searchAgentConfig, { jobDirectory, promptPath: runnerPromptPath });
   await writeJsonFile(path.join(jobDirectory, "studio-job.json"), sanitizedConfig(config));
   await writeJsonFile(path.join(jobDirectory, "manifest.json"), initialManifest(config, transcriptionPreflight));
   const stateFile = path.join(jobDirectory, "job-state.json");
-  const state = { id, status: "running", agent: selected.name, createdAt: new Date().toISOString(), message: "本地 Agent 已启动" };
+  const state = { id, status: "running", agent: selected.name, createdAt: new Date().toISOString(), message: selected.name.startsWith("builtin-") ? "首页模型与内置 Harness 已启动" : "所选 Agent Skill 已启动" };
   const { outputLog, errorLog } = jobLogStreams(jobDirectory);
   const child = spawn(selected.command, args, {
     cwd: jobDirectory,
@@ -3234,7 +3367,9 @@ async function resumeJob(id, body) {
     }
     if (config.transcription?.diarization && diarizationEngine(config.transcription) === "pyannote" && String(config.transcription?.hfToken || "").trim()) selected.env.HF_TOKEN = String(config.transcription.hfToken).trim();
   }
-  const args = adapterArguments(selected.name, config, prompt, searchAgentConfig);
+  const runnerPromptPath = path.join(jobDirectory, "work", "builtin-harness-prompt.md");
+  await writeFile(runnerPromptPath, prompt, "utf8");
+  const args = adapterArguments(selected.name, config, prompt, searchAgentConfig, { jobDirectory, promptPath: runnerPromptPath });
   await writeJsonFile(path.join(jobDirectory, "studio-job.json"), sanitizedConfig(config));
   const attempt = Number(state.attempt || 1) + 1;
   const nextState = { ...state, status: "running", agent: selected.name, attempt, resumedAt: new Date().toISOString(), message: `从“${phaseLabels[validated.resumeFrom]}”继续`, resumeFrom: validated.resumeFrom, warnings: validated.warnings };
@@ -3736,7 +3871,9 @@ async function launchExport(id, body) {
     "把精修后的角色、译文、起止时间和样式真正落实到 SRT/ASS；最多两行，对话型中文字幕去掉多余的句末句号‘。’但保留其他有语气意义的标点，使用角色色外圈描边、柔光和投影。重新执行字幕 QC、代表帧 OCR、无重编码封装与最终媒体流验证。不要重新下载或重新转写视频，不要覆盖原始媒体。",
     `交付文件写入 ${config.outputPath || path.join(directory, "deliverables")}，并更新 manifest 的 subtitle_qc、mux、final_validation 证据。`,
   ].join("\n");
-  const args = adapterArguments(selected.name, config, prompt);
+  const runnerPromptPath = path.join(directory, "work", "builtin-harness-export-prompt.md");
+  await writeFile(runnerPromptPath, prompt, "utf8");
+  const args = adapterArguments(selected.name, config, prompt, { codexArgs: [], claudeArgs: [] }, { jobDirectory: directory, promptPath: runnerPromptPath });
   const { outputLog, errorLog } = jobLogStreams(directory, "export-agent");
   const child = spawn(selected.command, args, { cwd: directory, env: selected.env, stdio: ["ignore", "pipe", "pipe"] });
   activeJobProcesses.set(id, child);
@@ -3816,6 +3953,10 @@ async function route(request) {
   if (request.method === "POST" && url.pathname === "/api/transcription/install") {
     const body = await readJson(request, 128 * 1024);
     return json(request, 202, startTranscriptionInstall(body.transcription || body));
+  }
+  if (request.method === "POST" && url.pathname === "/api/transcription/auto-install") {
+    const body = await readJson(request, 256 * 1024);
+    return json(request, 202, startModelAssistedTranscriptionInstall(body.engine || {}, body.transcription || {}));
   }
   if (request.method === "POST" && url.pathname === "/api/transcription/test") {
     const body = await readJson(request, 128 * 1024);

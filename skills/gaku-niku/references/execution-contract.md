@@ -6,6 +6,14 @@ Use this protocol when the host model needs concrete defaults for ASR, OCR, cue 
 
 The current model remains the only reasoning and translation authority. ASR, diarization, OCR, search, FFmpeg, and the bundled scripts are tools, not additional translators.
 
+In Studio use, “current model” means the exact model that passed step one's text-and-image test. The host must keep that ownership through environment repair and every later phase:
+
+- API and Ollama modes run through the bundled Built-in Harness without an external Agent CLI.
+- Agent Skill mode runs only the explicitly selected CLI; it must not silently fall back to another installed Agent.
+- Environment repair starts with deterministic diagnostics. The model receives only a redacted report and chooses among versioned, allowlisted repair actions; it never emits or executes arbitrary shell commands.
+- Missing mandatory ASR runtime/model components override a model omission. Optional diarization may be downgraded or disabled when permissions or resources are insufficient.
+- Every selected action, fallback, progress event, and final verification result remains visible in the Studio operation log.
+
 For source transcription:
 
 1. Prefer official or uploader-provided source-language subtitles.

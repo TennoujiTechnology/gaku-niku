@@ -14,6 +14,16 @@ description: "Single-model, research-first video subtitle localization for Bilib
 - 可以使用下载器、FFmpeg、FFprobe、ASR、OCR、搜索和本 Skill 的脚本作为工具；工具产物是证据或草稿，当前模型必须复核并作最终决定。
 - 若宿主强制并行/委派，要求由同一个主模型整合全部证据并逐句定稿；不得把子模型输出直接当成最终字幕。
 
+## Studio 执行宿主契约
+
+- 第一页通过图文能力测试的模型就是当前任务的统一执行模型，不只是“翻译 API”。它负责第二步环境诊断与方案选择，并持续负责后续八阶段的计划、研究、翻译、复核和验收判断。
+- `API 模式` 必须由项目内置 Built-in Harness 直接调用所选 API；不得要求电脑另装 Codex、Claude Code、OpenCode、Cline 或其他 Agent CLI，也不得在后台偷偷选择其中任意一个做总控。
+- `本地部署模型` 必须通过 Ollama 的兼容接口直连同一个 Built-in Harness；不得借用 Codex 或 Claude 做隐藏总控。
+- `Agent Skill 模式` 只调用用户在第一页明确选择并通过测试的 CLI；不得因为方便而换成另一种 CLI。
+- Built-in Harness 只暴露固定的文件、模型、搜索、ASR、OCR、FFmpeg、字幕生成与 manifest 原子更新工具。模型不得生成或执行任意 shell、任意脚本、删除动作或工作区外路径。
+- 环境配置先由程序采集真实、脱敏的操作系统/磁盘/运行库/模型状态，再让第一页模型在 `复用、补齐基础运行库、下载模型、配置 Sherpa-ONNX、授权后配置 pyannote、关闭可选分离` 这些白名单动作中选择。缺失的基础听写依赖是强制项，不能被模型省略；可选增强失败不得破坏已可用环境。
+- 每个模型决定、工具调用、失败、降级与验收结果都必须写入任务日志和 manifest。API 密钥、Token、Cookie 和完整媒体不得进入提示词或日志。
+
 ## 硬规则
 
 1. 只处理用户提供或有权访问的媒体；不绕过 DRM、付费墙和访问控制。
