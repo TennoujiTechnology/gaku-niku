@@ -22,6 +22,8 @@ Produce a research-backed translation and a verified playable deliverable. Defau
 11. Treat word alignment and speaker diarization as independent capabilities. The default local diarization route is Sherpa-ONNX with verified on-disk models; WhisperX / pyannote is an optional gated route. A successful import, an FFmpeg executable, or a non-empty token is not proof of real-audio readiness.
 12. Use the Studio-provided Manifest single-writer helper for every phase/artifact update. Submit a bounded JSON Merge Patch; never overwrite `manifest.json` directly. The helper must serialize writers and atomically replace the file.
 13. Send translation/review work as stable-ID item batches through the adaptive batch protocol. Size the first call below the output ceiling; if a child batch still reaches the limit, bisect only that child. Never regenerate an already valid sibling batch or the full transcript.
+14. Run as one bounded worker, not a swarm. Do not create Agent sub-tasks, background Agents, nested Codex/Claude sessions, or persistent preview services. Keep at most one heavyweight ASR/model/media child process active at a time. The Studio owns the memory, inactivity, concurrency, and log-size limits; never bypass or restart after one of those guards stops the job.
+15. Large transcripts, search evidence, OCR output, model responses, and validation reports belong in job files. Return only file paths, counts, material errors, and a short phase summary to the orchestrator. If a command or remote call produces no log or manifest progress for ten minutes, stop it, preserve the current manifest/artifacts, and exit instead of polling indefinitely.
 
 ## Start every job
 
@@ -197,6 +199,8 @@ Report the final media path, external subtitle paths, actual resolution/codecs, 
 
 ## Recovery rules
 
+- A resource-guard stop (`memory_limit`, `idle_timeout`, `hard_timeout`, or `server_shutdown`) is resumable, not a signal to launch a parallel replacement. Verify the recorded phase artifacts, close stale child processes, then resume only the first incomplete phase.
+- When the requested phase is complete, blocked, or safely checkpointed, exit the Agent process immediately. Do not keep a shell, local preview server, browser, watcher, or model daemon alive merely to report status.
 - If a downloader fails, preserve partial files and logs; retry the same phase after checking direct versus configured proxy.
 - Classify model and asset failures before retrying. Treat HTTP `401`/`403` as terminal with zero blind retries: ask the user to accept the gated model terms, replace the credential, or disable diarization. For `429`, honor `Retry-After`; for timeouts, incomplete downloads, and transient `5xx` responses, preserve the partial cache and allow at most two bounded automatic retries.
 - Retry only the failed asset download, model load, or bounded smoke stage. Never rerun the complete alignment/diarization pipeline in a loop, and never retranscribe already valid chunks merely because diarization failed.

@@ -1,6 +1,17 @@
-# GakuNiku · 自学型熟肉机 v0.2.0
+# GakuNiku · 自学型熟肉机 v0.2.1
 
-首个同时面向 macOS Apple Silicon 与 Windows x64 的便携测试版。
+面向 macOS Apple Silicon 与 Windows x64 的低内存稳定性更新。
+
+## v0.2.1 更新
+
+- 默认只运行一个完整字幕任务，并监控 Agent、ASR、FFmpeg 与模型子进程组成的整个进程树。
+- 默认任务内存上限为 6 GiB；超限、连续 10 分钟无进度或单轮达到 8 小时时保存断点并停止。
+- Agent 标准日志限制为 32 MB、错误日志限制为 8 MB，保留两份轮转备份，避免长任务无限增长。
+- GakuNiku 关闭时会终止任务和媒体子进程，并限时关闭本地连接，避免 Vinext、Workerd 或模型进程残留。
+- WhisperX / pyannote 未获 Hugging Face 权限时立即降级；默认提供无需 gated 权限的本地 Sherpa-ONNX 说话人分离。
+- 大模型结构化批次接近输出上限时自动缩小失败子批次，避免整批重做。
+- 终止任务后自动返回准备首页；任务文件和断点保留，可从右上角“历史任务”重新打开。
+- 便携包包含完整内存管理模块、字幕 Harness 与可独立使用的 GakuNiku Skill。
 
 ## 主要能力
 

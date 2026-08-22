@@ -140,6 +140,10 @@ test("ships the real harness and low-memory local bridge", async () => {
   ]) {
     assert.match(component, new RegExp(phrase));
   }
+  assert.match(component, /function returnHomeAfterTermination/);
+  assert.match(component, /localStorage\.removeItem\(ACTIVE_JOB_STORE\)/);
+  assert.match(component, /setWorkspace\("prepare"\)/);
+  assert.match(component, /从历史任务中重新打开/);
   const projectSnapshotSource = component.slice(component.indexOf("function currentProjectSnapshot"), component.indexOf("function saveStudioProject"));
   assert.match(projectSnapshotSource, /gakuniku-project|PROJECT_FILE_FORMAT/);
   assert.doesNotMatch(projectSnapshotSource, /\bapiKey\b|\bhfToken\b|\bsearchApiKey\b|\btranscriptionApiKey\b/);

@@ -1,2 +1,2 @@
-32268772ebc9e7624110259c5f38a5db9fdff1bbf6a306b2d33061cf3529d1b4  GakuNiku-v0.2.0-macos-arm64.zip
-ebc00bf949e56f1b4d01885e71e81bd565132410044ec6db9f4797d6308cc4e9  GakuNiku-v0.2.0-windows-x64.zip
+e9a383977513ecc1cebf2b3b639b8ba672e43831c0f40b947aecc004f5715db6  GakuNiku-v0.2.1-macos-arm64.zip
+530e9966ddaaf646ded31d262bc6fd68d6ffa9dddf847db037554437e557e10c  GakuNiku-v0.2.1-windows-x64.zip

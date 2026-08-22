@@ -322,7 +322,14 @@ type TranscriptionTestResult = {
   model: string;
 };
 type PhaseDetail = { status: PhaseStatus; rawStatus: string; evidence: string[]; detail: string; startedAt: string | null; finishedAt: string | null; durationMs: number | null; riskSummary?: Record<string, number> | null };
-type JobResources = { elapsedMs: number | null; diskBytes: number; diskLabel: string; attempt: number; process: null | { rssBytes: number; rssLabel: string; cpuPercent: number; memoryPercent: number; elapsed: string } };
+type JobResources = {
+  elapsedMs: number | null;
+  diskBytes: number;
+  diskLabel: string;
+  attempt: number;
+  process: null | { rssBytes: number; rssLabel: string; cpuPercent: number; memoryPercent: number; processCount?: number; elapsed: string };
+  policy?: { memoryLimitBytes: number; memoryLimitLabel: string; idleTimeoutMs: number; hardTimeoutMs: number; maxConcurrentJobs: number; stdoutLogLimitLabel: string };
+};
 
 function endpointOrigin(value: string) {
   try { return new URL(value).origin; } catch { return String(value || "").trim().replace(/\/$/, ""); }
@@ -1403,10 +1410,7 @@ export function SubtitleStudio() {
           return;
         }
         if (data.status === "cancelled") {
-          setRunMessage(data.message ?? "任务已终止，已有成果已保留，可从断点继续");
-          setRunError("");
-          setJobBlocker(null);
-          setTerminateConfirmOpen(false);
+          returnHomeAfterTermination(data.message ?? "任务已终止，已有成果已保留，可从历史任务中重新打开");
           return;
         }
         timer = window.setTimeout(pollJob, 1500);
@@ -2606,6 +2610,31 @@ export function SubtitleStudio() {
     }
   }
 
+  function returnHomeAfterTermination(message: string) {
+    window.localStorage.removeItem(ACTIVE_JOB_STORE);
+    completedJobHydratedRef.current = "";
+    completedJobAutoOpenedRef.current = "";
+    setJobId("");
+    setJobRunStatus("idle");
+    setWorkspace("prepare");
+    setTerminateConfirmOpen(false);
+    setJobBlocker(null);
+    setSelectedPhaseId("");
+    setRunError("");
+    setRunMessage("");
+    setProgress(0);
+    setPhaseStates(Object.fromEntries(phaseDefinitions.map(([id]) => [id, "pending"])));
+    setPhaseDetails({});
+    setTrace([]);
+    setJobResources(null);
+    setJobDiagnostics(null);
+    setJobConnectionFailures(0);
+    setJobTokenUsage(emptyTokenUsage());
+    setManifestLimitations([]);
+    setManifestNotices([]);
+    setProjectNotice(message);
+  }
+
   async function terminateCurrentJob() {
     if (!jobId || terminateBusy) return;
     setTerminateBusy(true);
@@ -2615,10 +2644,13 @@ export function SubtitleStudio() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "无法终止任务");
       if (["running", "blocked", "failed", "cancelled", "completed"].includes(data.status)) setJobRunStatus(data.status as JobRunStatus);
-      setRunMessage(data.message || "任务已终止，已有成果已保留，可从断点继续");
-      if (data.status === "cancelled") setJobBlocker(null);
-      setTerminateConfirmOpen(false);
-      setJobPollRevision((value) => value + 1);
+      const message = data.message || "任务已终止，已有成果已保留，可从历史任务中重新打开";
+      if (data.status === "cancelled") returnHomeAfterTermination(message);
+      else {
+        setRunMessage(message);
+        setTerminateConfirmOpen(false);
+        setJobPollRevision((value) => value + 1);
+      }
     } catch (error) {
       setRunError(error instanceof Error ? error.message : "无法终止任务");
     } finally {
@@ -2648,7 +2680,7 @@ export function SubtitleStudio() {
     return {
       format: PROJECT_FILE_FORMAT,
       version: PROJECT_FILE_VERSION,
-      appVersion: "0.2.0",
+      appVersion: "0.2.1",
       savedAt: new Date().toISOString(),
       workspace,
       job: jobId ? { id: jobId } : null,
@@ -3239,7 +3271,7 @@ export function SubtitleStudio() {
             {cameraFocus === "harness" && <div className="workflow-launch">
               <label className="trace-option"><input aria-label="显示 Agent 执行轨迹" type="checkbox" checked={showTrace} onChange={(event) => setShowTrace(event.target.checked)} /><span><strong>显示 Agent 执行轨迹</strong><small>查看工具动作与推理摘要，不展示隐藏思维链</small></span></label>
               <button className="primary-action" onClick={() => void startTranslation()}><span>▶</span><strong>开始翻译并统一检查</strong><small>{engineVerified && videoReady && transcriptionReadyForCamera && researchReady && (!currentExternalProcessingPlan.required || externalConsentChecked) ? "所有准备项已完成，点击后创建任务" : "缺项会准确定位回对应步骤；已经填写的内容不会丢失"}</small></button>
-              <p className="resource-note">低内存模式：媒体按需解码，Agent 输出直接写入日志。</p>
+              <p className="resource-note">低内存模式：单任务串行执行、媒体按需解码、日志自动轮转；长时间无进度会保存断点并停止。</p>
             </div>}
           </div>
           </div>
@@ -3268,7 +3300,7 @@ export function SubtitleStudio() {
           <section className="panel run-panel">
             <div className="progress-header"><strong>总进度</strong><span>{Math.round(progress)}%</span></div>
             <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-            {jobResources && <div className="run-metrics"><span><small>本轮</small><strong>第 {jobResources.attempt} 次</strong></span><span><small>已用时间</small><strong>{formatElapsed(jobResources.elapsedMs)}</strong></span><span><small>任务文件</small><strong>{jobResources.diskLabel}</strong></span><span><small>进程内存</small><strong>{jobResources.process?.rssLabel || "未运行"}</strong></span><span><small>CPU</small><strong>{jobResources.process ? `${jobResources.process.cpuPercent.toFixed(1)}%` : "—"}</strong></span></div>}
+            {jobResources && <div className="run-metrics"><span><small>本轮</small><strong>第 {jobResources.attempt} 次</strong></span><span><small>已用时间</small><strong>{formatElapsed(jobResources.elapsedMs)}</strong></span><span><small>任务文件</small><strong>{jobResources.diskLabel}</strong></span><span title={jobResources.process ? `共 ${jobResources.process.processCount || 1} 个任务子进程；上限 ${jobResources.policy?.memoryLimitLabel || "自动"}` : "任务进程未运行"}><small>进程树内存</small><strong>{jobResources.process?.rssLabel || "未运行"}{jobResources.process && jobResources.policy?.memoryLimitLabel ? ` / ${jobResources.policy.memoryLimitLabel}` : ""}</strong></span><span><small>CPU</small><strong>{jobResources.process ? `${jobResources.process.cpuPercent.toFixed(1)}%` : "—"}</strong></span></div>}
             <div className="phase-list">
               {phaseDefinitions.map(([id, label, description], index) => {
                 const status = phaseStates[id] ?? "pending";
@@ -3287,7 +3319,7 @@ export function SubtitleStudio() {
             {jobDiagnostics?.stderr?.length ? <details className="run-diagnostics"><summary>查看错误日志摘要</summary><pre>{jobDiagnostics.stderr.join("\n")}</pre><small>日志位置：{jobDiagnostics.logPath}</small></details> : null}
             {jobBlocker && <section className="job-blocker"><header><span>需要处理</span><strong>{jobBlocker.label}</strong></header><p>{jobBlocker.detail}</p>{jobBlocker.evidence.length > 0 && <div>{jobBlocker.evidence.slice(-3).map((item, index) => <small key={`${index}-${item}`}>• {item}</small>)}</div>}<div className="job-blocker-actions"><button className="secondary-button" onClick={() => { setWorkspace("prepare"); if (jobBlocker.phase === "source_transcript") window.setTimeout(() => document.querySelector(".transcription-config")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); }}>返回设置并处理</button><button className="resume-button" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : `从${phaseDefinitions.find(([id]) => id === jobBlocker.phase)?.[1] || "阻塞阶段"}继续`}</button></div>{(!engineVerified || (transcriptionEnvironment && !transcriptionEnvironment.ready)) && <small className="resume-hint">点击继续时会重新核对模型凭据与听写环境；真实短音频测试是可选诊断。</small>}</section>}
             {runError && <div className="notice error"><strong>{jobConnectionFailures ? "正在重新连接" : jobBlocker ? "任务已阻塞" : "任务中断"}</strong><span>{runError}</span>{jobConnectionFailures > 0 && <button className="notice-retry" onClick={() => { setRunError(""); setJobPollRevision((value) => value + 1); }}>立即重试</button>}{!jobConnectionFailures && !jobBlocker && jobId && <button className="notice-retry" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : "从断点继续"}</button>}</div>}
-            {jobRunStatus === "cancelled" && <section className="job-cancelled"><div><strong>任务已终止</strong><span>Agent 与子进程已经停止；已完成阶段和现有文件均已保留。</span></div><button className="resume-button" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : "从断点继续"}</button></section>}
+            {jobRunStatus === "cancelled" && <section className="job-cancelled"><div><strong>任务已终止</strong><span>{runMessage || "Agent 与子进程已经停止；已完成阶段和现有文件均已保留。"}</span></div><button className="resume-button" disabled={resumeBusy} onClick={() => void resumeBlockedJob()}>{resumeBusy ? "正在续跑…" : "从断点继续"}</button></section>}
             <div className="run-footer"><span>任务 ID：{jobId || "创建中"}</span><button className="secondary-button" onClick={() => setWorkspace("prepare")}>返回设置</button><button className="secondary-button" onClick={loadDemo}>打开示例精修台</button></div>
           </section>
         </main>

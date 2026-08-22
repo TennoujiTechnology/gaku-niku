@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +28,7 @@ const web = spawn(vinext, ["dev"], {
   env: inheritedEnvironment,
   stdio: "inherit",
   windowsHide: true,
+  detached: process.platform !== "win32",
 });
 
 web.on("error", (error) => {
@@ -35,15 +36,24 @@ web.on("error", (error) => {
   if (!bridge.killed) bridge.kill("SIGTERM");
 });
 
+function stopWeb(signal) {
+  if (!web.killed && web.pid) {
+    if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(web.pid), "/T", "/F"], { windowsHide: true, timeout: 5_000 });
+    else {
+      try { process.kill(-web.pid, signal); } catch { web.kill(signal); }
+    }
+  }
+}
+
 function stop(signal) {
   if (!bridge.killed) bridge.kill(signal);
-  if (!web.killed) web.kill(signal);
+  stopWeb(signal);
 }
 
 process.on("SIGINT", () => stop("SIGINT"));
 process.on("SIGTERM", () => stop("SIGTERM"));
-bridge.on("exit", (code) => {
-  if (code && !web.killed) web.kill("SIGTERM");
+bridge.on("exit", () => {
+  stopWeb("SIGTERM");
 });
 web.on("exit", (code) => {
   if (!bridge.killed) bridge.kill("SIGTERM");

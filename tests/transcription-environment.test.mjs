@@ -29,6 +29,22 @@ async function startBridge() {
   throw new Error(`bridge did not start: ${stderr}`);
 }
 
+test("health endpoint exposes the bounded job resource policy", async (t) => {
+  const bridge = await startBridge();
+  t.after(() => bridge.child.kill());
+
+  const response = await fetch(`http://127.0.0.1:${bridge.port}/api/health`);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+
+  assert.equal(result.version, 4);
+  assert.equal(result.resourcePolicy.maxConcurrentJobs, 1);
+  assert.ok(result.resourcePolicy.memoryLimitBytes >= 1024 ** 3);
+  assert.equal(result.resourcePolicy.idleTimeoutMs, 10 * 60 * 1000);
+  assert.equal(result.resourcePolicy.stdoutLogLimitBytes, 32 * 1024 ** 2);
+  assert.equal(result.resourcePolicy.stderrLogLimitBytes, 8 * 1024 ** 2);
+});
+
 test("transcription check is read-only and reports missing local dependencies", async (t) => {
   const bridge = await startBridge();
   t.after(() => bridge.child.kill());

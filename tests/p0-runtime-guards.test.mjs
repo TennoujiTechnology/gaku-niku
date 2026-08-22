@@ -68,10 +68,11 @@ test("adaptive API batches shrink only the child that reaches the output limit",
 });
 
 test("job launch source contains real preflight, immediate diarization downgrade, and manifest helper enforcement", async () => {
-  const [server, skill, launcher] = await Promise.all([
+  const [server, skill, launcher, resourceManager] = await Promise.all([
     readFile(new URL("../local-agent-bridge/server.mjs", import.meta.url), "utf8"),
     readFile(new URL("../harness/precision-video-subtitles/SKILL.md", import.meta.url), "utf8"),
     readFile(new URL("../local-agent-bridge/launch.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../local-agent-bridge/job-resource-manager.mjs", import.meta.url), "utf8"),
   ]);
   for (const phrase of [
     "runTaskTranscriptionPreflight",
@@ -82,13 +83,21 @@ test("job launch source contains real preflight, immediate diarization downgrade
     "diarization: false",
     "Manifest 单写入器",
     "batchItems、batchInstruction",
+    "assertJobCapacity",
+    "startJobMonitor",
+    "server_shutdown",
   ]) assert.ok(server.includes(phrase), `server missing P0 guard: ${phrase}`);
   for (const phrase of [
     "manifest.transcription_preflight",
     "Prefer the Studio-managed Sherpa-ONNX runtime",
     "adaptive batch protocol",
+    "Do not create Agent sub-tasks",
+    "resource-guard stop",
   ]) assert.ok(skill.includes(phrase), `harness missing P0 guard: ${phrase}`);
   for (const phrase of ["mkdtempSync", ".precision-subtitle-studio", "inheritedEnvironment.TMPDIR"]) {
     assert.ok(launcher.includes(phrase), `launcher missing writable temp fallback: ${phrase}`);
+  }
+  for (const phrase of ["maxConcurrentJobs", "idleTimeoutMs", "RotatingLogWriter", "processTreeSnapshot"]) {
+    assert.ok(resourceManager.includes(phrase), `resource manager missing guard: ${phrase}`);
   }
 });

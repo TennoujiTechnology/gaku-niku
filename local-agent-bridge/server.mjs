@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, statfs, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -11,6 +11,7 @@ import { finished } from "node:stream/promises";
 import { deflateSync } from "node:zlib";
 import { ProxyAgent } from "undici";
 import { ambiguityReviewModeFromConfig, ambiguityReviewPolicyPrompt, workflowPhaseStatus } from "./ambiguity-policy.mjs";
+import { createRotatingLogStream, jobResourcePolicy, processTreeSnapshot } from "./job-resource-manager.mjs";
 import { updateJsonAtomic, writeJsonAtomic } from "./manifest-store.mjs";
 import { ensureManagedUv, findExecutable, managedInstallCapabilities, managedUvPath, managedUvxPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "./runtime-manager.mjs";
 
@@ -85,6 +86,8 @@ const proxyDispatchers = new Map();
 const jobResourceCache = new Map();
 const jobPhaseStatusCache = new Map();
 const activeJobProcesses = new Map();
+const activeJobMonitors = new Map();
+const resourcePolicy = jobResourcePolicy();
 
 await Promise.all([jobsRoot, knowledgeRoot, previewRoot].map((directory) => mkdir(directory, { recursive: true })));
 
@@ -2119,8 +2122,8 @@ async function generateResearchWithCli(engine, prompt, options = {}) {
   else if (name === "cline") args = ["--json", "--auto-approve", "true", ...(engine.model ? ["--model", engine.model] : []), prompt];
   else throw new Error(`暂不支持用 ${name} 生成预习文档。`);
 
-  const stdout = createWriteStream(stdoutPath);
-  const stderr = createWriteStream(stderrPath);
+  const stdout = createRotatingLogStream(stdoutPath, { maxBytes: resourcePolicy.stdoutLogBytes, backups: resourcePolicy.logBackups });
+  const stderr = createRotatingLogStream(stderrPath, { maxBytes: resourcePolicy.stderrLogBytes, backups: resourcePolicy.logBackups });
   const child = spawn(command, args, { cwd: directory, env: agentConfig.env, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.pipe(stdout);
   child.stderr.pipe(stderr);
@@ -2262,8 +2265,8 @@ async function testLocalEngine(engine, messages, options = {}) {
   else throw new Error(`不支持测试 ${name}`);
   const stdoutPath = path.join(directory, "stdout.log");
   const stderrPath = path.join(directory, "stderr.log");
-  const stdout = createWriteStream(stdoutPath);
-  const stderr = createWriteStream(stderrPath);
+  const stdout = createRotatingLogStream(stdoutPath, { maxBytes: resourcePolicy.stdoutLogBytes, backups: resourcePolicy.logBackups });
+  const stderr = createRotatingLogStream(stderrPath, { maxBytes: resourcePolicy.stderrLogBytes, backups: resourcePolicy.logBackups });
   const child = spawn(command, args, { cwd: directory, env: applyProxyEnv({ ...process.env }, engine.proxyUrl), stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.pipe(stdout);
   child.stderr.pipe(stderr);
@@ -2673,7 +2676,7 @@ function buildPrompt(config, jobDirectory, context = {}) {
     ] : []),
     "字幕硬约束: 每个逻辑字幕最多两行；充分利用横向安全区；对话型中文字幕默认不在每条末尾添加句号‘。’，但保留句中的句号以及必要的问号、感叹号、省略号和破折号；从该人开口的第一个词出现，到最后一个词结束时消失；可靠角色色用于外圈描边、柔光和投影；不可靠时使用确定性随机色并记录；疑点先分级，只有画面文字确实可能解疑时才抽帧/OCR。",
     "人物实体硬约束: 一个角色及其对应声优/出演者只能生成一个人物实体。roles 中同时保存 characterName、performerName 与 speakingAs；动画/剧情角色对白使用 speakingAs=character，访谈、舞台、广播或活动中本人发言使用 speakingAs=performer，证据不足用 unknown。name 必须等于当前发言身份对应的名字。不得把角色名和声优名拆成两个 role，也不得把作品名、组合名、活动名或匿名聚类标签当成人物。",
-    "资源约束: 不得把完整视频读入内存；音频以 5–10 分钟分块并保留 2–5 秒重叠；子进程与转写结果直接落盘。",
+    `资源约束: 不得把完整视频读入内存；音频以 5–10 分钟分块并保留 2–5 秒重叠；子进程与转写结果直接落盘。不得创建子任务、并行 Agent 或后台常驻服务，同一时刻最多运行一个重型模型/媒体子进程。连续 ${Math.round(resourcePolicy.idleTimeoutMs / 60_000)} 分钟没有新日志或清单进度时必须停止当前命令并把断点写入 manifest，不得无限轮询。完整转写、搜索、OCR、模型响应和验证输出只写文件；终端每次仅返回不超过约 4 KB 的摘要。完成或阻塞后立即退出，不得自动开启清单之外的新阶段或继续等待。`,
     `精修数据: 完成字幕后额外写出 ${path.join(jobDirectory, "work", "studio-review.json")}，JSON 结构为 {"roles":[{"id":"同一角色—声优对的稳定实体 ID","name":"当前字幕显示名","characterName":"角色名或空串","performerName":"声优/出演者名或空串","speakingAs":"character|performer|unknown","color":"#RRGGBB","colorSource":{"kind":"official|evidence|user|fallback","reference":"直接来源 URL、用户确认或回退规则"}}],"cues":[{"id":1,"start":0.0,"end":1.0,"speakerId":"...","source":"...","translation":"...","confidence":0.95,"flagged":false}]}。同一角色—声优对只能有一条 role；该文件只含文本和时间码，不嵌入媒体。`,
     "清单语义: manifest.limitations 只记录尚未解决且会实质影响字幕语义、可读性、媒体完整性或交付验收的问题。已经按约定成功使用的确定性角色色回退、已解决但为可选人工复看而保留 flagged=true 的句子，都写入 manifest.notices 与相应报告/精修数据，不得列为 limitation。",
     `开始前读取 SKILL.md 及其直接引用的三个 reference。每开始一个阶段通过 ${manifestHelperPath} 将 manifest 对应 status 更新为 in_progress，每完成则原子更新为 complete 并记录 evidence；无法继续写 blocked 和原因。不得直接写 manifest。完成后保留 SRT、ASS、封装视频和验证报告。`,
@@ -2733,7 +2736,91 @@ function adapterArguments(name, config, prompt, searchAgentConfig = { codexArgs:
   throw new Error(`不支持的 Agent: ${name}`);
 }
 
+function activePipelineIds() {
+  const active = [];
+  for (const [id, child] of activeJobProcesses) {
+    if (!child?.pid || !processAlive(Number(child.pid))) {
+      activeJobProcesses.delete(id);
+      continue;
+    }
+    active.push(id);
+  }
+  return active;
+}
+
+function assertJobCapacity(exceptId = "") {
+  const sameJob = exceptId ? activeJobProcesses.get(exceptId) : null;
+  if (sameJob?.pid && processAlive(Number(sameJob.pid))) throw new Error("这个任务仍在运行；请先终止当前进程，再从断点继续或重新导出。");
+  const active = activePipelineIds();
+  if (active.length < resourcePolicy.maxConcurrentJobs) return;
+  throw new Error(`低内存保护：当前已有 ${active.length} 个完整任务正在运行。默认最多同时运行 ${resourcePolicy.maxConcurrentJobs} 个；请先终止或等待现有任务完成。`);
+}
+
+function jobLogStreams(directory, prefix = "agent") {
+  return {
+    outputLog: createRotatingLogStream(path.join(directory, "logs", `${prefix}.ndjson`), { maxBytes: resourcePolicy.stdoutLogBytes, backups: resourcePolicy.logBackups }),
+    errorLog: createRotatingLogStream(path.join(directory, "logs", `${prefix}.stderr.log`), { maxBytes: resourcePolicy.stderrLogBytes, backups: resourcePolicy.logBackups }),
+  };
+}
+
+function stopJobMonitor(id) {
+  const monitor = activeJobMonitors.get(id);
+  if (!monitor) return;
+  monitor.stop();
+  activeJobMonitors.delete(id);
+}
+
+function startJobMonitor(id, child, stateFile, activityStreams = []) {
+  stopJobMonitor(id);
+  const startedAt = Date.now();
+  let lastActivityAt = startedAt;
+  let lastManifestMtime = 0;
+  let checking = false;
+  let stopping = false;
+  const touch = () => { lastActivityAt = Date.now(); };
+  for (const stream of activityStreams) stream?.on?.("data", touch);
+  const stop = () => {
+    clearInterval(timer);
+    for (const stream of activityStreams) stream?.off?.("data", touch);
+  };
+  const requestStop = async (reason, message) => {
+    if (stopping) return;
+    stopping = true;
+    stop();
+    await terminateJob(id, { reason, message, automatic: true }).catch(() => {
+      stopJobProcessTree(Number(child.pid));
+    });
+  };
+  const check = async () => {
+    if (checking || stopping || child.exitCode !== null || child.signalCode) return;
+    checking = true;
+    try {
+      const manifestPath = path.join(path.dirname(stateFile), "manifest.json");
+      const manifestInfo = await stat(manifestPath).catch(() => null);
+      if (manifestInfo && manifestInfo.mtimeMs > lastManifestMtime) {
+        if (lastManifestMtime > 0) touch();
+        lastManifestMtime = manifestInfo.mtimeMs;
+      }
+      const snapshot = processTreeSnapshot(Number(child.pid));
+      if (snapshot?.rssBytes > resourcePolicy.memoryLimitBytes) {
+        await requestStop("memory_limit", `内存保护已暂停任务：进程树占用 ${formatStorage(snapshot.rssBytes)}，超过 ${formatStorage(resourcePolicy.memoryLimitBytes)} 上限；现有阶段产物已保留，可从断点继续。`);
+      } else if (Date.now() - lastActivityAt >= resourcePolicy.idleTimeoutMs) {
+        await requestStop("idle_timeout", `任务连续 ${Math.round(resourcePolicy.idleTimeoutMs / 60_000)} 分钟没有日志或清单进度，已自动停止以避免后台无限等待；现有成果已保留。`);
+      } else if (Date.now() - startedAt >= resourcePolicy.hardTimeoutMs) {
+        await requestStop("hard_timeout", `本轮任务已达到 ${Math.round(resourcePolicy.hardTimeoutMs / 3_600_000)} 小时运行上限，已保存断点并停止；请检查阶段产物后再续跑。`);
+      }
+    } finally {
+      checking = false;
+    }
+  };
+  const timer = setInterval(() => { void check(); }, resourcePolicy.monitorIntervalMs);
+  timer.unref?.();
+  activeJobMonitors.set(id, { stop });
+  return { touch, stop };
+}
+
 async function launchJob(inputConfig) {
+  assertJobCapacity();
   let config = structuredClone(inputConfig);
   const kind = sourceKind(config.source);
   if (kind === "unknown") throw new Error("无法识别视频位置，请使用本地完整路径或 yt-dlp 支持的网页链接。 ");
@@ -2804,8 +2891,7 @@ async function launchJob(inputConfig) {
   await writeJsonFile(path.join(jobDirectory, "manifest.json"), initialManifest(config, transcriptionPreflight));
   const stateFile = path.join(jobDirectory, "job-state.json");
   const state = { id, status: "running", agent: selected.name, createdAt: new Date().toISOString(), message: "本地 Agent 已启动" };
-  const outputLog = createWriteStream(path.join(jobDirectory, "logs", "agent.ndjson"), { flags: "a" });
-  const errorLog = createWriteStream(path.join(jobDirectory, "logs", "agent.stderr.log"), { flags: "a" });
+  const { outputLog, errorLog } = jobLogStreams(jobDirectory);
   const child = spawn(selected.command, args, {
     cwd: jobDirectory,
     env: selected.env,
@@ -2815,8 +2901,16 @@ async function launchJob(inputConfig) {
   child.stdout.pipe(outputLog);
   child.stderr.pipe(errorLog);
   state.pid = child.pid;
+  state.resourcePolicy = {
+    memoryLimitBytes: resourcePolicy.memoryLimitBytes,
+    idleTimeoutMs: resourcePolicy.idleTimeoutMs,
+    hardTimeoutMs: resourcePolicy.hardTimeoutMs,
+    maxConcurrentJobs: resourcePolicy.maxConcurrentJobs,
+  };
   await writeJsonFile(stateFile, state);
+  startJobMonitor(id, child, stateFile, [child.stdout, child.stderr]);
   child.on("error", async (error) => {
+    stopJobMonitor(id);
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
     activeJobProcesses.delete(id);
     const latest = await readJsonFile(stateFile, state);
@@ -2824,6 +2918,7 @@ async function launchJob(inputConfig) {
     await writeJsonFile(stateFile, { ...latest, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
   });
   child.on("close", async (code, signal) => {
+    stopJobMonitor(id);
     activeJobProcesses.delete(id);
     outputLog.end();
     errorLog.end();
@@ -2943,12 +3038,13 @@ function manifestPresentationNotes(manifest = {}) {
   return { limitations, notices };
 }
 
-async function terminateJob(id) {
+async function terminateJob(id, options = {}) {
   const jobDirectory = safeJobDirectory(id);
   const stateFile = path.join(jobDirectory, "job-state.json");
   const state = await readJsonFile(stateFile);
   if (!state) throw new Error("任务不存在");
   const child = activeJobProcesses.get(id);
+  stopJobMonitor(id);
   if (state.status === "completed" || state.status === "cancelled") {
     if (child?.pid) stopJobProcessTree(Number(child.pid));
     activeJobProcesses.delete(id);
@@ -2962,12 +3058,15 @@ async function terminateJob(id) {
     };
   }
   const stoppedAt = new Date().toISOString();
+  const message = String(options.message || "任务已终止，已有成果已保留，可从断点继续");
   const cancelled = {
     ...state,
     status: "cancelled",
-    message: "任务已终止，已有成果已保留，可从断点继续",
+    message,
     cancelledAt: stoppedAt,
     finishedAt: stoppedAt,
+    stopReason: String(options.reason || "user_cancelled"),
+    automaticStop: Boolean(options.automatic),
   };
   delete cancelled.error;
   delete cancelled.blocker;
@@ -2975,7 +3074,7 @@ async function terminateJob(id) {
   const pid = Number(child?.pid || (state.status === "running" ? state.pid : 0));
   stopJobProcessTree(pid);
   activeJobProcesses.delete(id);
-  return { id, status: "cancelled", message: cancelled.message, resumable: true };
+  return { id, status: "cancelled", message: cancelled.message, resumable: true, stopReason: cancelled.stopReason, automaticStop: cancelled.automaticStop };
 }
 
 function phaseBlocker(manifest, id) {
@@ -3057,6 +3156,7 @@ async function validateResumeManifest(directory, manifest, config) {
 }
 
 async function resumeJob(id, body) {
+  assertJobCapacity(id);
   const jobDirectory = safeJobDirectory(id);
   const stateFile = path.join(jobDirectory, "job-state.json");
   const [stored, state, existingManifest] = await Promise.all([
@@ -3141,15 +3241,22 @@ async function resumeJob(id, body) {
   delete nextState.error;
   delete nextState.blocker;
   delete nextState.finishedAt;
-  const outputLog = createWriteStream(path.join(jobDirectory, "logs", "agent.ndjson"), { flags: "a" });
-  const errorLog = createWriteStream(path.join(jobDirectory, "logs", "agent.stderr.log"), { flags: "a" });
+  const { outputLog, errorLog } = jobLogStreams(jobDirectory);
   const child = spawn(selected.command, args, { cwd: jobDirectory, env: selected.env, stdio: ["ignore", "pipe", "pipe"] });
   activeJobProcesses.set(id, child);
   child.stdout.pipe(outputLog);
   child.stderr.pipe(errorLog);
   nextState.pid = child.pid;
+  nextState.resourcePolicy = {
+    memoryLimitBytes: resourcePolicy.memoryLimitBytes,
+    idleTimeoutMs: resourcePolicy.idleTimeoutMs,
+    hardTimeoutMs: resourcePolicy.hardTimeoutMs,
+    maxConcurrentJobs: resourcePolicy.maxConcurrentJobs,
+  };
   await writeJsonFile(stateFile, nextState);
+  startJobMonitor(id, child, stateFile, [child.stdout, child.stderr]);
   child.on("error", async (error) => {
+    stopJobMonitor(id);
     if (searchAgentConfig.ephemeralConfigPath) await unlink(searchAgentConfig.ephemeralConfigPath).catch(() => {});
     activeJobProcesses.delete(id);
     const latest = await readJsonFile(stateFile, nextState);
@@ -3157,6 +3264,7 @@ async function resumeJob(id, body) {
     await writeJsonFile(stateFile, { ...latest, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
   });
   child.on("close", async (code, signal) => {
+    stopJobMonitor(id);
     activeJobProcesses.delete(id);
     outputLog.end(); errorLog.end();
     await Promise.all([finished(outputLog).catch(() => {}), finished(errorLog).catch(() => {})]);
@@ -3442,11 +3550,31 @@ async function jobResources(directory, state) {
   const diskBytes = await directoryBytes(directory);
   let processInfo = null;
   if (state.status === "running" && processAlive(Number(state.pid))) {
-    const probe = spawnSync("/bin/ps", ["-o", "rss=,%cpu=,%mem=,etime=", "-p", String(state.pid)], { encoding: "utf8", timeout: 3000, maxBuffer: 64 * 1024 });
-    const match = probe.status === 0 ? probe.stdout.trim().match(/^(\d+)\s+([\d.]+)\s+([\d.]+)\s+(.+)$/) : null;
-    if (match) processInfo = { rssBytes: Number(match[1]) * 1024, rssLabel: formatStorage(Number(match[1]) * 1024), cpuPercent: Number(match[2]), memoryPercent: Number(match[3]), elapsed: match[4].trim() };
+    const snapshot = processTreeSnapshot(Number(state.pid));
+    if (snapshot) processInfo = {
+      rssBytes: snapshot.rssBytes,
+      rssLabel: formatStorage(snapshot.rssBytes),
+      cpuPercent: snapshot.cpuPercent,
+      memoryPercent: os.totalmem() ? (snapshot.rssBytes / os.totalmem()) * 100 : 0,
+      processCount: snapshot.processCount,
+      elapsed: "",
+    };
   }
-  const value = { elapsedMs, diskBytes, diskLabel: formatStorage(diskBytes), process: processInfo, attempt: Number(state.attempt || 1) };
+  const value = {
+    elapsedMs,
+    diskBytes,
+    diskLabel: formatStorage(diskBytes),
+    process: processInfo,
+    attempt: Number(state.attempt || 1),
+    policy: {
+      memoryLimitBytes: resourcePolicy.memoryLimitBytes,
+      memoryLimitLabel: formatStorage(resourcePolicy.memoryLimitBytes),
+      idleTimeoutMs: resourcePolicy.idleTimeoutMs,
+      hardTimeoutMs: resourcePolicy.hardTimeoutMs,
+      maxConcurrentJobs: resourcePolicy.maxConcurrentJobs,
+      stdoutLogLimitLabel: formatStorage(resourcePolicy.stdoutLogBytes),
+    },
+  };
   jobResourceCache.set(directory, { expiresAt: Date.now() + 5000, pid: state.pid, status: state.status, value });
   return value;
 }
@@ -3583,6 +3711,7 @@ function selectedMediaResponse(request, token) {
 }
 
 async function launchExport(id, body) {
+  assertJobCapacity(id);
   const directory = safeJobDirectory(id);
   const [stored, manifest] = await Promise.all([
     readJsonFile(path.join(directory, "studio-job.json")),
@@ -3608,21 +3737,28 @@ async function launchExport(id, body) {
     `交付文件写入 ${config.outputPath || path.join(directory, "deliverables")}，并更新 manifest 的 subtitle_qc、mux、final_validation 证据。`,
   ].join("\n");
   const args = adapterArguments(selected.name, config, prompt);
-  const outputLog = createWriteStream(path.join(directory, "logs", "export-agent.ndjson"), { flags: "a" });
-  const errorLog = createWriteStream(path.join(directory, "logs", "export-agent.stderr.log"), { flags: "a" });
+  const { outputLog, errorLog } = jobLogStreams(directory, "export-agent");
   const child = spawn(selected.command, args, { cwd: directory, env: selected.env, stdio: ["ignore", "pipe", "pipe"] });
+  activeJobProcesses.set(id, child);
   child.stdout.pipe(outputLog);
   child.stderr.pipe(errorLog);
   const stateFile = path.join(directory, "job-state.json");
-  const state = { id, status: "running", agent: selected.name, pid: child.pid, createdAt: new Date().toISOString(), message: "正在根据精修结果重新导出" };
+  const state = { id, status: "running", agent: selected.name, pid: child.pid, createdAt: new Date().toISOString(), message: "正在根据精修结果重新导出", resourcePolicy: { memoryLimitBytes: resourcePolicy.memoryLimitBytes, idleTimeoutMs: resourcePolicy.idleTimeoutMs, hardTimeoutMs: resourcePolicy.hardTimeoutMs, maxConcurrentJobs: resourcePolicy.maxConcurrentJobs } };
   await writeJsonFile(stateFile, state);
+  startJobMonitor(id, child, stateFile, [child.stdout, child.stderr]);
   child.on("error", async (error) => {
+    stopJobMonitor(id);
+    activeJobProcesses.delete(id);
     await writeJsonFile(stateFile, { ...state, status: "failed", error: error.message, finishedAt: new Date().toISOString() });
   });
   child.on("close", async (code, signal) => {
+    stopJobMonitor(id);
+    activeJobProcesses.delete(id);
     outputLog.end();
     errorLog.end();
+    await Promise.all([finished(outputLog).catch(() => {}), finished(errorLog).catch(() => {})]);
     const latest = await readJsonFile(stateFile, state);
+    if (latest.status === "cancelled") return;
     await writeJsonFile(stateFile, { ...latest, status: code === 0 ? "completed" : "failed", exitCode: code, signal, ...(code === 0 ? { message: "精修版已导出并验证" } : { error: `导出 Agent 退出，代码 ${code ?? "unknown"}` }), finishedAt: new Date().toISOString() });
   });
   return { id, status: "running", agent: selected.name };
@@ -3635,7 +3771,19 @@ async function route(request) {
   const url = new URL(request.url);
   const asset = request.method === "GET" ? await staticResponse(request, url.pathname) : null;
   if (asset) return asset;
-  if (request.method === "GET" && url.pathname === "/api/health") return json(request, 200, { ok: true, version: 3 });
+  if (request.method === "GET" && url.pathname === "/api/health") return json(request, 200, {
+    ok: true,
+    version: 4,
+    resourcePolicy: {
+      maxConcurrentJobs: resourcePolicy.maxConcurrentJobs,
+      memoryLimitBytes: resourcePolicy.memoryLimitBytes,
+      memoryLimitLabel: formatStorage(resourcePolicy.memoryLimitBytes),
+      idleTimeoutMs: resourcePolicy.idleTimeoutMs,
+      hardTimeoutMs: resourcePolicy.hardTimeoutMs,
+      stdoutLogLimitBytes: resourcePolicy.stdoutLogBytes,
+      stderrLogLimitBytes: resourcePolicy.stderrLogBytes,
+    },
+  });
   if (request.method === "GET" && url.pathname === "/api/capabilities") return json(request, 200, capabilities());
   if (request.method === "GET" && url.pathname === "/api/harness") return json(request, 200, { text: await readFile(harnessPath, "utf8"), path: harnessPath });
   if (request.method === "POST" && url.pathname === "/api/pick-transcription-environment") {
@@ -3807,3 +3955,34 @@ const server = createServer(async (incoming, outgoing) => {
 server.listen(port, "127.0.0.1", () => {
   process.stdout.write(`自学型熟肉机: http://127.0.0.1:${port}\nJobs: ${jobsRoot}\n`);
 });
+
+let shutdownPromise = null;
+function shutdownServer(signal) {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    const activeIds = [...activeJobProcesses.keys()];
+    await Promise.all(activeIds.map((id) => terminateJob(id, {
+      reason: "server_shutdown",
+      automatic: true,
+      message: "GakuNiku 后端已关闭，任务与全部子进程已停止；现有成果已保存，可稍后从断点继续。",
+    }).catch(() => {})));
+    for (const id of [...activeJobMonitors.keys()]) stopJobMonitor(id);
+    await new Promise((resolve) => {
+      const forceClose = setTimeout(() => {
+        server.closeAllConnections?.();
+        resolve();
+      }, 5_000);
+      forceClose.unref?.();
+      server.close(() => {
+        clearTimeout(forceClose);
+        resolve();
+      });
+      server.closeIdleConnections?.();
+    });
+    process.exitCode = signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1;
+  })();
+  return shutdownPromise;
+}
+
+process.once("SIGINT", () => { void shutdownServer("SIGINT"); });
+process.once("SIGTERM", () => { void shutdownServer("SIGTERM"); });

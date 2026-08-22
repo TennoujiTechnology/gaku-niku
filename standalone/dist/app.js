@@ -23467,10 +23467,7 @@
             return;
           }
           if (data.status === "cancelled") {
-            setRunMessage(data.message ?? "\u4EFB\u52A1\u5DF2\u7EC8\u6B62\uFF0C\u5DF2\u6709\u6210\u679C\u5DF2\u4FDD\u7559\uFF0C\u53EF\u4ECE\u65AD\u70B9\u7EE7\u7EED");
-            setRunError("");
-            setJobBlocker(null);
-            setTerminateConfirmOpen(false);
+            returnHomeAfterTermination(data.message ?? "\u4EFB\u52A1\u5DF2\u7EC8\u6B62\uFF0C\u5DF2\u6709\u6210\u679C\u5DF2\u4FDD\u7559\uFF0C\u53EF\u4ECE\u5386\u53F2\u4EFB\u52A1\u4E2D\u91CD\u65B0\u6253\u5F00");
             return;
           }
           timer = window.setTimeout(pollJob, 1500);
@@ -24593,6 +24590,30 @@
         setHistoryJobBusy(false);
       }
     }
+    function returnHomeAfterTermination(message) {
+      window.localStorage.removeItem(ACTIVE_JOB_STORE);
+      completedJobHydratedRef.current = "";
+      completedJobAutoOpenedRef.current = "";
+      setJobId("");
+      setJobRunStatus("idle");
+      setWorkspace("prepare");
+      setTerminateConfirmOpen(false);
+      setJobBlocker(null);
+      setSelectedPhaseId("");
+      setRunError("");
+      setRunMessage("");
+      setProgress(0);
+      setPhaseStates(Object.fromEntries(phaseDefinitions.map(([id]) => [id, "pending"])));
+      setPhaseDetails({});
+      setTrace([]);
+      setJobResources(null);
+      setJobDiagnostics(null);
+      setJobConnectionFailures(0);
+      setJobTokenUsage(emptyTokenUsage());
+      setManifestLimitations([]);
+      setManifestNotices([]);
+      setProjectNotice(message);
+    }
     async function terminateCurrentJob() {
       if (!jobId || terminateBusy) return;
       setTerminateBusy(true);
@@ -24602,10 +24623,13 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "\u65E0\u6CD5\u7EC8\u6B62\u4EFB\u52A1");
         if (["running", "blocked", "failed", "cancelled", "completed"].includes(data.status)) setJobRunStatus(data.status);
-        setRunMessage(data.message || "\u4EFB\u52A1\u5DF2\u7EC8\u6B62\uFF0C\u5DF2\u6709\u6210\u679C\u5DF2\u4FDD\u7559\uFF0C\u53EF\u4ECE\u65AD\u70B9\u7EE7\u7EED");
-        if (data.status === "cancelled") setJobBlocker(null);
-        setTerminateConfirmOpen(false);
-        setJobPollRevision((value) => value + 1);
+        const message = data.message || "\u4EFB\u52A1\u5DF2\u7EC8\u6B62\uFF0C\u5DF2\u6709\u6210\u679C\u5DF2\u4FDD\u7559\uFF0C\u53EF\u4ECE\u5386\u53F2\u4EFB\u52A1\u4E2D\u91CD\u65B0\u6253\u5F00";
+        if (data.status === "cancelled") returnHomeAfterTermination(message);
+        else {
+          setRunMessage(message);
+          setTerminateConfirmOpen(false);
+          setJobPollRevision((value) => value + 1);
+        }
       } catch (error) {
         setRunError(error instanceof Error ? error.message : "\u65E0\u6CD5\u7EC8\u6B62\u4EFB\u52A1");
       } finally {
@@ -24633,7 +24657,7 @@
       return {
         format: PROJECT_FILE_FORMAT,
         version: PROJECT_FILE_VERSION,
-        appVersion: "0.2.0",
+        appVersion: "0.2.1",
         savedAt: (/* @__PURE__ */ new Date()).toISOString(),
         workspace,
         job: jobId ? { id: jobId } : null,
@@ -25927,7 +25951,7 @@
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u5F00\u59CB\u7FFB\u8BD1\u5E76\u7EDF\u4E00\u68C0\u67E5" }),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: engineVerified && videoReady && transcriptionReadyForCamera && researchReady && (!currentExternalProcessingPlan.required || externalConsentChecked) ? "\u6240\u6709\u51C6\u5907\u9879\u5DF2\u5B8C\u6210\uFF0C\u70B9\u51FB\u540E\u521B\u5EFA\u4EFB\u52A1" : "\u7F3A\u9879\u4F1A\u51C6\u786E\u5B9A\u4F4D\u56DE\u5BF9\u5E94\u6B65\u9AA4\uFF1B\u5DF2\u7ECF\u586B\u5199\u7684\u5185\u5BB9\u4E0D\u4F1A\u4E22\u5931" })
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "resource-note", children: "\u4F4E\u5185\u5B58\u6A21\u5F0F\uFF1A\u5A92\u4F53\u6309\u9700\u89E3\u7801\uFF0CAgent \u8F93\u51FA\u76F4\u63A5\u5199\u5165\u65E5\u5FD7\u3002" })
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "resource-note", children: "\u4F4E\u5185\u5B58\u6A21\u5F0F\uFF1A\u5355\u4EFB\u52A1\u4E32\u884C\u6267\u884C\u3001\u5A92\u4F53\u6309\u9700\u89E3\u7801\u3001\u65E5\u5FD7\u81EA\u52A8\u8F6E\u8F6C\uFF1B\u957F\u65F6\u95F4\u65E0\u8FDB\u5EA6\u4F1A\u4FDD\u5B58\u65AD\u70B9\u5E76\u505C\u6B62\u3002" })
             ] })
           ] }) }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("aside", { className: "workflow-overview", "aria-label": "\u51C6\u5907\u9636\u6BB5\u5DE5\u4F5C\u6D41", children: [
@@ -26051,9 +26075,12 @@
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u4EFB\u52A1\u6587\u4EF6" }),
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: jobResources.diskLabel })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u8FDB\u7A0B\u5185\u5B58" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: jobResources.process?.rssLabel || "\u672A\u8FD0\u884C" })
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { title: jobResources.process ? `\u5171 ${jobResources.process.processCount || 1} \u4E2A\u4EFB\u52A1\u5B50\u8FDB\u7A0B\uFF1B\u4E0A\u9650 ${jobResources.policy?.memoryLimitLabel || "\u81EA\u52A8"}` : "\u4EFB\u52A1\u8FDB\u7A0B\u672A\u8FD0\u884C", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u8FDB\u7A0B\u6811\u5185\u5B58" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
+                jobResources.process?.rssLabel || "\u672A\u8FD0\u884C",
+                jobResources.process && jobResources.policy?.memoryLimitLabel ? ` / ${jobResources.policy.memoryLimitLabel}` : ""
+              ] })
             ] }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "CPU" }),
@@ -26187,7 +26214,7 @@
           jobRunStatus === "cancelled" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "job-cancelled", children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u4EFB\u52A1\u5DF2\u7EC8\u6B62" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Agent \u4E0E\u5B50\u8FDB\u7A0B\u5DF2\u7ECF\u505C\u6B62\uFF1B\u5DF2\u5B8C\u6210\u9636\u6BB5\u548C\u73B0\u6709\u6587\u4EF6\u5747\u5DF2\u4FDD\u7559\u3002" })
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: runMessage || "Agent \u4E0E\u5B50\u8FDB\u7A0B\u5DF2\u7ECF\u505C\u6B62\uFF1B\u5DF2\u5B8C\u6210\u9636\u6BB5\u548C\u73B0\u6709\u6587\u4EF6\u5747\u5DF2\u4FDD\u7559\u3002" })
             ] }),
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "resume-button", disabled: resumeBusy, onClick: () => void resumeBlockedJob(), children: resumeBusy ? "\u6B63\u5728\u7EED\u8DD1\u2026" : "\u4ECE\u65AD\u70B9\u7EE7\u7EED" })
           ] }),

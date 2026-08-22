@@ -2,6 +2,9 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
+const projectRoot = path.resolve(import.meta.dirname, "..");
+const packageJson = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+
 const packageArgument = process.argv.slice(2).find((argument) => argument !== "--");
 const packageRoot = path.resolve(packageArgument || "");
 if (!packageArgument || packageRoot === path.parse(packageRoot).root) {
@@ -62,7 +65,7 @@ try {
   const capabilitiesResponse = await fetch(`http://127.0.0.1:${port}/api/capabilities`);
   if (!capabilitiesResponse.ok) throw new Error("能力接口无法读取");
   const releaseNotes = await readFile(path.join(packageRoot, "RELEASE_NOTES.md"), "utf8");
-  if (!releaseNotes.includes("v0.2.0")) throw new Error("发行说明版本不匹配");
+  if (!releaseNotes.includes(`v${packageJson.version}`)) throw new Error("发行说明版本不匹配");
   process.stdout.write(`便携版冒烟测试通过：Node ${version.stdout.trim()}，后端、首页与能力接口均可用\n`);
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
