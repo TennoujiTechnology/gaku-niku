@@ -21,7 +21,6 @@ const staticRoot = path.join(projectRoot, "standalone");
 const harnessPath = path.join(projectRoot, "harness", "precision-video-subtitles", "SKILL.md");
 const transcriptionEnvironmentHarnessPath = path.join(projectRoot, "harness", "precision-video-subtitles", "references", "transcription-environment-agent.md");
 const transcriptionEnvironmentHarness = readFileSync(transcriptionEnvironmentHarnessPath, "utf8").trim();
-const apiHelperPath = path.join(bridgeDirectory, "api-model-call.mjs");
 const builtinHarnessRunnerPath = path.join(bridgeDirectory, "builtin-harness-runner.mjs");
 const manifestHelperPath = path.join(bridgeDirectory, "manifest-update.mjs");
 const whisperxPreflightPath = path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "preflight_whisperx.py");

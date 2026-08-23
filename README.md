@@ -6,7 +6,7 @@ GakuNiku 是一个本地运行的视频字幕翻译工具，当前重点支持�
 
 ## 当前版本
 
-当前版本为 `v0.2.1`，提供：
+当前版本为 `v0.2.2`，提供：
 
 - macOS Apple Silicon 便携包
 - Windows x64 便携包
@@ -63,7 +63,7 @@ Skill 负责组织工作流；FFmpeg、下载器和校验脚本负责确定性�
 - macOS：双击 `启动 GakuNiku.command`
 - Windows：双击 `启动 GakuNiku.cmd`
 
-程序会启动本地后端并打开 `http://127.0.0.1:43127`。便携包已经包含 Node.js 和 `uv`；Faster-Whisper、WhisperX 与模型权重会在用户确认后按需下载。
+程序会启动本地后端并打开 `http://127.0.0.1:43127`。便携包已经包含 Node.js、`uv` 和固定校验版本的 FFmpeg/FFprobe；Faster-Whisper、WhisperX 与模型权重会在用户确认后按需下载到项目环境。
 
 ### 从源码启动
 

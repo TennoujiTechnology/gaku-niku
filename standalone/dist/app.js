@@ -22947,7 +22947,12 @@
   }
   function projectDownloadName(source) {
     const raw = source.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "GakuNiku-project";
-    const stem = raw.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "GakuNiku-project";
+    const invalidFileNameCharacters = '<>:"/\\|?*';
+    const sanitized = Array.from(raw, (character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 31 || invalidFileNameCharacters.includes(character) ? "-" : character;
+    }).join("");
+    const stem = sanitized.replace(/\s+/g, " ").trim().slice(0, 80) || "GakuNiku-project";
     const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10).replaceAll("-", "");
     return `${stem}-${stamp}.gakuniku`;
   }
@@ -23488,7 +23493,7 @@
         active = false;
         window.clearTimeout(timer);
       };
-    }, [jobId, jobPollRevision, workspace]);
+    }, [jobId, jobPollRevision, source, workspace]);
     (0, import_react2.useEffect)(() => {
       return () => {
         if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
