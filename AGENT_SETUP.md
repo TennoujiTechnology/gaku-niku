@@ -25,7 +25,7 @@
 | 类别 | 便携包 | 从源码运行 | 是否必需 |
 | --- | --- | --- | --- |
 | 应用运行时 | 已包含 Node.js `22.14.0` | Node.js `22.13` 或更新版本 | 必需 |
-| 前端依赖 | 已编译，无需 npm 安装 | `npm install` | 仅源码开发必需 |
+| 前端依赖 | 已编译，无需 pnpm 安装 | `pnpm install` | 仅源码开发必需 |
 | Python 工具链 | 包含或按清单准备 `uv`，由项目管理 Python `3.11` | 优先使用项目托管 `uv`；兼容平台可自动准备 Python `3.11` | 本地听写必需 |
 | FFmpeg / FFprobe | 优先使用包内工具，其次检查 `PATH` | 检查 `PATH` 或项目托管工具链 | 真实视频任务必需 |
 | 下载器 | 按来源选择 yutto / yt-dlp | 按来源选择 yutto / yt-dlp | 仅网络视频必需 |
@@ -36,7 +36,7 @@
 
 ```bash
 node --version
-npm --version
+pnpm --version
 ffmpeg -version
 ffprobe -version
 ```
@@ -219,8 +219,8 @@ python3 harness/precision-video-subtitles/scripts/check_environment.py \
 首次安装前端依赖：
 
 ```bash
-npm install
-npm run local
+pnpm install
+pnpm local
 ```
 
 使用仓库内已编译的轻量界面时，也可以只启动后端：

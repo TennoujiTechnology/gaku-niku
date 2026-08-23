@@ -70,15 +70,15 @@ Skill 负责组织工作流；FFmpeg、下载器和校验脚本负责确定性�
 需要 Node.js 22.13 或更新版本。
 
 ```bash
-npm install
-npm run local
+pnpm install
+pnpm local
 ```
 
 也可以分别启动后端和开发服务器：
 
 ```bash
-npm run bridge
-npm run dev
+pnpm bridge
+pnpm dev
 ```
 
 ## 模型与听写
@@ -141,8 +141,8 @@ Agent Skill 模式提供 Codex、Claude Code、OpenCode、Pi、Cline 等适配�
 ## 构建发行包
 
 ```bash
-npm run build:standalone
-npm run release:portable -- --output /path/to/release-test
+pnpm build:standalone
+pnpm release:portable -- --output /path/to/release-test
 ```
 
 发行包使用固定版本的运行时清单和 SHA256 校验。平台配置位于 [`release/release-manifest.json`](./release/release-manifest.json)，运行时配置位于 [`runtime/runtime-manifest.json`](./runtime/runtime-manifest.json)。
@@ -150,8 +150,8 @@ npm run release:portable -- --output /path/to/release-test
 ## 测试
 
 ```bash
-npm test
-npm run lint
+pnpm test
+pnpm lint
 ```
 
 CI 会在 macOS 与 Windows 上检查运行时清单、前端构建和自动化测试。

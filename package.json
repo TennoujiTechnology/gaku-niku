@@ -2,6 +2,7 @@
   "name": "gaku-niku",
   "version": "0.2.2",
   "private": true,
+  "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -17,6 +18,7 @@
     "runtime:prepare": "node scripts/prepare-runtime-toolchain.mjs",
     "release:portable": "node scripts/build-portable-release.mjs",
     "release:smoke": "node scripts/smoke-portable-release.mjs",
+    "repo:check": "node scripts/check-repository-hygiene.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
