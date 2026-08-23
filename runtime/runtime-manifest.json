@@ -34,9 +34,40 @@
     "preference": "only-managed"
   },
   "nativeTools": {
+    "version": "n8.0.1-1",
     "strategy": "prefer-packaged-then-path",
     "packagedDirectory": "runtime/toolchain/{platform}",
-    "tools": ["ffmpeg", "ffprobe", "yt-dlp"]
+    "tools": ["ffmpeg", "ffprobe", "yt-dlp"],
+    "assets": {
+      "macos-arm64": {
+        "ffmpeg": {
+          "file": "ffmpeg-osx-arm64",
+          "url": "https://github.com/shaka-project/static-ffmpeg-binaries/releases/download/n8.0.1-1/ffmpeg-osx-arm64",
+          "sha256": "c334b7f418e10201dc6c8e42407f5198c3270524cc77d40606e746be3c49159a",
+          "bytes": 33477032
+        },
+        "ffprobe": {
+          "file": "ffprobe-osx-arm64",
+          "url": "https://github.com/shaka-project/static-ffmpeg-binaries/releases/download/n8.0.1-1/ffprobe-osx-arm64",
+          "sha256": "8c7333207cedbdf501e54dd5bd57b3e5725e73405415244eabaafa61e34c4999",
+          "bytes": 33302392
+        }
+      },
+      "windows-x64": {
+        "ffmpeg": {
+          "file": "ffmpeg-win-x64.exe",
+          "url": "https://github.com/shaka-project/static-ffmpeg-binaries/releases/download/n8.0.1-1/ffmpeg-win-x64.exe",
+          "sha256": "73d555001653d97d3bb328e68e3eb36cf0dca395babd3714d4e51c42da9b16ba",
+          "bytes": 53153280
+        },
+        "ffprobe": {
+          "file": "ffprobe-win-x64.exe",
+          "url": "https://github.com/shaka-project/static-ffmpeg-binaries/releases/download/n8.0.1-1/ffprobe-win-x64.exe",
+          "sha256": "1a37f089d21c177c189e0fd8c5d8cafe775f64f7ebca847f66ae3fd192ea6090",
+          "bytes": 52958208
+        }
+      }
+    }
   },
   "agentClis": {
     "strategy": "external-adapters",
@@ -49,7 +80,8 @@
         "faster-whisper==1.2.1",
         "ctranslate2==4.8.1",
         "tokenizers==0.22.2",
-        "huggingface-hub==1.8.0"
+        "huggingface-hub==1.8.0",
+        "socksio==1.0.0"
       ]
     },
     "diarization-sherpa": {

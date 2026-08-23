@@ -22992,6 +22992,7 @@
     const [transcriptionInstallOpen, setTranscriptionInstallOpen] = (0, import_react2.useState)(false);
     const [transcriptionInstallRuntime, setTranscriptionInstallRuntime] = (0, import_react2.useState)(true);
     const [transcriptionInstallModel, setTranscriptionInstallModel] = (0, import_react2.useState)(true);
+    const [transcriptionInstallMediaTools, setTranscriptionInstallMediaTools] = (0, import_react2.useState)(true);
     const [transcriptionInstallDiarization, setTranscriptionInstallDiarization] = (0, import_react2.useState)(false);
     const [transcriptionInstallConfirmed, setTranscriptionInstallConfirmed] = (0, import_react2.useState)(false);
     const [transcriptionInstallBusy, setTranscriptionInstallBusy] = (0, import_react2.useState)(false);
@@ -23177,12 +23178,14 @@
     const transcriptionRequestedReady = Boolean(transcriptionEnvironment && (transcriptionEnvironment.requestedReady ?? transcriptionEnvironment.ready));
     const transcriptionRuntimeReady = transcriptionEnvironment?.components.find((item) => item.id === "runtime")?.status === "ready";
     const transcriptionModelReady = transcriptionEnvironment?.components.find((item) => item.id === "model")?.status === "ready";
+    const transcriptionMediaToolsReady = transcriptionEnvironment?.components.find((item) => item.id === "media-tools")?.status === "ready";
     const transcriptionDiarizationReady = transcriptionEnvironment?.components.find((item) => item.id === "diarization")?.status === "ready";
+    const transcriptionEnvironmentIssueCount = transcriptionEnvironment?.components.filter((item) => item.status === "missing" || item.status === "degraded").length || 0;
     const transcriptionDiarizationNeedsSetup = Boolean(transcriptionEnvironment?.baseReady && transcriptionDiarization && !transcriptionDiarizationReady);
-    const transcriptionNeedsEnvironmentSetup = Boolean(transcriptionEnvironment && (!transcriptionRuntimeReady || !transcriptionModelReady || transcriptionDiarizationNeedsSetup));
-    const transcriptionHasInstallSelection = transcriptionInstallRuntime || transcriptionInstallModel || transcriptionInstallDiarization;
+    const transcriptionNeedsEnvironmentSetup = Boolean(transcriptionEnvironment && (!transcriptionRuntimeReady || !transcriptionModelReady || !transcriptionMediaToolsReady || transcriptionDiarizationNeedsSetup));
+    const transcriptionHasInstallSelection = transcriptionInstallRuntime || transcriptionInstallModel || transcriptionInstallMediaTools || transcriptionInstallDiarization;
     const transcriptionInstallSelectionSupported = Boolean(
-      (!transcriptionInstallRuntime && !transcriptionInstallModel || transcriptionEnvironment?.installationCapabilities?.base !== false) && (!transcriptionInstallDiarization || transcriptionEnvironment?.installationCapabilities?.diarization !== false)
+      (!transcriptionInstallRuntime && !transcriptionInstallModel || transcriptionEnvironment?.installationCapabilities?.base !== false) && (!transcriptionInstallMediaTools || transcriptionEnvironment?.installationCapabilities?.mediaTools !== false) && (!transcriptionInstallDiarization || transcriptionEnvironment?.installationCapabilities?.diarization !== false)
     );
     const researchReady = Boolean(researchPreview.trim());
     const harnessReady = Boolean(harnessText.trim());
@@ -23637,6 +23640,14 @@
       setTranscriptionTestResult(null);
       setTranscriptionUploadConfirmed(false);
     }
+    function applyTranscriptionEnvironmentResult(data) {
+      setTranscriptionEnvironment(data || null);
+      const repair = data?.diagnostics?.repairComponents || {};
+      setTranscriptionInstallRuntime(Boolean(repair.runtime));
+      setTranscriptionInstallModel(Boolean(repair.model));
+      setTranscriptionInstallMediaTools(Boolean(repair.mediaTools));
+      setTranscriptionInstallDiarization(Boolean(repair.diarization));
+    }
     async function checkTranscriptionEnvironment(override) {
       setTranscriptionCheckBusy(true);
       setTranscriptionCheckError("");
@@ -23648,14 +23659,10 @@
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "\u65E0\u6CD5\u68C0\u67E5\u542C\u5199\u73AF\u5883");
-        setTranscriptionEnvironment(data);
+        applyTranscriptionEnvironmentResult(data);
         if (!transcriptionEnvironmentRoot.trim() && data.environmentRoot) setTranscriptionEnvironmentRoot(String(data.environmentRoot));
         setTranscriptionTestStage("idle");
         setTranscriptionTestResult(null);
-        const repair = data.diagnostics?.repairComponents || {};
-        setTranscriptionInstallRuntime(Boolean(repair.runtime));
-        setTranscriptionInstallModel(Boolean(repair.model));
-        setTranscriptionInstallDiarization(Boolean(repair.diarization));
         setTranscriptionInstallOpen(false);
         setTranscriptionInstallConfirmed(false);
         setTranscriptionDiagnosis("");
@@ -23665,21 +23672,7 @@
         setTranscriptionCheckBusy(false);
       }
     }
-    async function applyRecommendedTranscriptionSetup() {
-      const recommended = {
-        ...transcriptionPayload(),
-        mode: "local",
-        provider: "faster_whisper",
-        model: "turbo",
-        quality: "balanced",
-        language: "ja",
-        diarization: false,
-        wordTimestamps: true,
-        beamSize: transcriptionQualityPresets.balanced.beamSize,
-        secondPass: false,
-        chunkMinutes: 10,
-        environmentRoot: transcriptionEnvironmentRoot.trim()
-      };
+    function applyRecommendedTranscriptionSetup() {
       setTranscriptionMode("local");
       setTranscriptionProvider("faster_whisper");
       setTranscriptionQuality("balanced");
@@ -23688,11 +23681,11 @@
       setTranscriptionDiarization(false);
       setTranscriptionWordTimestamps(true);
       invalidateTranscriptionEnvironment();
-      await checkTranscriptionEnvironment(recommended);
     }
     async function prepareTranscriptionEnvironment(selection) {
       const selectedRuntime = selection?.runtime ?? transcriptionInstallRuntime;
       const selectedModel = selection?.model ?? transcriptionInstallModel;
+      const selectedMediaTools = selection?.mediaTools ?? transcriptionInstallMediaTools;
       const selectedDiarization = selection?.diarization ?? transcriptionInstallDiarization;
       const confirmed = selection?.confirmed ?? transcriptionInstallConfirmed;
       if (!confirmed) return;
@@ -23716,6 +23709,7 @@
               components: {
                 runtime: selectedRuntime,
                 model: selectedModel,
+                mediaTools: selectedMediaTools,
                 diarization: selectedDiarization
               }
             }
@@ -23734,10 +23728,11 @@
           setTranscriptionInstallEvents(Array.isArray(status.events) ? status.events : []);
           if (status.status === "completed") {
             complete = true;
-            setTranscriptionEnvironment(status.result || null);
+            applyTranscriptionEnvironmentResult(status.result);
             setTranscriptionInstallProgress(100);
             setTranscriptionInstallConfirmed(false);
           } else if (status.status === "failed") {
+            applyTranscriptionEnvironmentResult(status.result);
             throw new Error(status.error || "\u542C\u5199\u73AF\u5883\u51C6\u5907\u5931\u8D25");
           }
         }
@@ -23750,11 +23745,12 @@
     async function prepareDiarizationEnvironment() {
       setTranscriptionInstallRuntime(false);
       setTranscriptionInstallModel(false);
+      setTranscriptionInstallMediaTools(false);
       setTranscriptionInstallDiarization(true);
       setTranscriptionInstallConfirmed(false);
       setTranscriptionInstallOpen(true);
       window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
-      await prepareTranscriptionEnvironment({ runtime: false, model: false, diarization: true, confirmed: true });
+      await prepareTranscriptionEnvironment({ runtime: false, model: false, mediaTools: false, diarization: true, confirmed: true });
     }
     async function continueWithoutDiarization() {
       const withoutDiarization = { ...transcriptionPayload(), diarization: false, hfToken: "" };
@@ -23824,10 +23820,12 @@
               setTranscriptionDiarization(Boolean(applied.diarization));
               if (applied.diarizationEngine === "pyannote" || applied.diarizationEngine === "sherpa_onnx") setTranscriptionDiarizationEngine(applied.diarizationEngine);
             }
-            setTranscriptionEnvironment(status.result || null);
+            applyTranscriptionEnvironmentResult(status.result);
             setTranscriptionInstallProgress(100);
             setTranscriptionDiagnosis(status.result?.modelPlan?.explanation || "\u7B2C\u4E00\u6B65\u6A21\u578B\u5DF2\u5B8C\u6210\u6700\u5C0F\u73AF\u5883\u914D\u7F6E\u5E76\u901A\u8FC7\u7A0B\u5E8F\u6821\u9A8C");
           } else if (status.status === "failed") {
+            applyTranscriptionEnvironmentResult(status.result);
+            if (status.modelPlan?.explanation) setTranscriptionDiagnosis(`${status.modelPlan.explanation}\uFF1B\u6267\u884C\u8FC7\u7A0B\u4E2D\u53D1\u73B0\u65B0\u7684\u73AF\u5883\u95EE\u9898\uFF0C\u9875\u9762\u5DF2\u5237\u65B0\u4E3A\u5F53\u524D\u771F\u5B9E\u72B6\u6001\uFF0C\u53EF\u518D\u6B21\u8BA9\u6A21\u578B\u6309\u65B0\u8BCA\u65AD\u7EE7\u7EED\u4FEE\u590D\u3002`);
             throw new Error(status.error || "\u6A21\u578B\u81EA\u52A8\u914D\u7F6E\u5931\u8D25");
           }
         }
@@ -25318,77 +25316,114 @@
                 ] })
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("fieldset", { className: "step-fields", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: `step-resolution-banner ${transcriptionRequestedReady ? "ready" : "attention"}`, children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: transcriptionRequestedReady ? "RECOMMENDED SETUP READY" : "NO STEP LOCK" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionRequestedReady ? "\u63A8\u8350\u542C\u5199\u73AF\u5883\u5DF2\u5C31\u7EEA" : transcriptionDiarizationNeedsSetup ? "\u57FA\u7840\u542C\u5199\u53EF\u7528\uFF1B\u8BF4\u8BDD\u4EBA\u5206\u79BB\u5F85\u914D\u7F6E" : transcriptionEnvironment ? "\u542C\u5199\u73AF\u5883\u9700\u8981\u8865\u9F50" : "\u53EF\u4EE5\u5148\u914D\u7F6E\u89C6\u9891\uFF1B\u542C\u5199\u73AF\u5883\u7531\u8FD9\u91CC\u89E3\u51B3" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: transcriptionRequestedReady ? "\u7EE7\u7EED\u586B\u5199\u89C6\u9891\u4E0E\u8F93\u51FA\u5373\u53EF\uFF1B\u771F\u5B9E\u77ED\u97F3\u9891\u6D4B\u8BD5\u662F\u53EF\u9009\u7684\u8D28\u91CF\u8BCA\u65AD\uFF0C\u4E0D\u4F1A\u963B\u6B62\u540E\u7EED\u6B65\u9AA4\u3002" : transcriptionDiarizationNeedsSetup ? "\u4E0D\u914D\u7F6E\u4E5F\u80FD\u7EE7\u7EED\u4EFB\u52A1\uFF1B\u9700\u8981\u533A\u5206\u8BF4\u8BDD\u4EBA\u65F6\uFF0C\u53EF\u5728\u4E0B\u65B9\u4E0B\u8F7D\u672C\u5730\u5206\u79BB\u5F15\u64CE\u3002" : "\u4E0D\u4F1A\u628A\u4F60\u6321\u5728\u7B2C\u4E00\u6B65\u3002\u53EF\u91C7\u7528 Faster-Whisper turbo\u3001\u65E5\u8BED\u3001\u8BCD\u7EA7\u65F6\u95F4\u6233\u7684\u9ED8\u8BA4\u53C2\u6570\u68C0\u67E5\u672C\u673A\uFF1B\u5982\u9700\u4E0B\u8F7D\uFF0C\u4ECD\u4F1A\u5148\u5C55\u793A\u4F53\u79EF\u548C\u4FDD\u5B58\u4F4D\u7F6E\u4F9B\u4F60\u786E\u8BA4\u3002" })
+                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "source-setup-guide", "aria-label": "\u89C6\u9891\u4E0E\u542C\u5199\u914D\u7F6E\u987A\u5E8F", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "SETUP ORDER" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u6309\u987A\u5E8F\u5B8C\u6210\u8FD9 3 \u9879" })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u6BCF\u4E00\u6B65\u90FD\u5728\u4E0B\u65B9\u5BF9\u5E94\u533A\u57DF\u5B8C\u6210" })
                   ] }),
-                  !transcriptionEnvironment?.ready && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "step-resolution-actions", children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void applyRecommendedTranscriptionSetup(), disabled: transcriptionCheckBusy || transcriptionInstallBusy, children: transcriptionCheckBusy ? "\u6B63\u5728\u68C0\u67E5\u9ED8\u8BA4\u914D\u7F6E\u2026" : "\u91C7\u7528\u63A8\u8350\u53C2\u6570\u5E76\u68C0\u67E5" }),
-                    transcriptionEnvironment && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: () => {
-                      setTranscriptionInstallOpen(true);
-                      window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
-                    }, children: "\u67E5\u770B\u7F3A\u9879\u4E0E\u5904\u7406\u65B9\u5F0F" })
-                  ] })
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "video-source", children: "\u89C6\u9891\u4F4D\u7F6E" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "source-input-row", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "video-source", value: source, onChange: (event) => {
-                    setSource(event.target.value);
-                    setResearchPreview("");
-                    setTranscriptionTestStage("idle");
-                    setTranscriptionTestDetail("\u89C6\u9891\u5DF2\u53D8\u5316\uFF1B\u53EF\u6309\u9700\u6D4B\u8BD5\u771F\u5B9E\u97F3\u9891");
-                    setTranscriptionTestResult(null);
-                  }, placeholder: "\u7C98\u8D34 Bilibili / YouTube / \u5176\u4ED6\u94FE\u63A5\uFF0C\u6216\u8F93\u5165\u672C\u5730\u8DEF\u5F84" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { ref: fileInputRef, className: "visually-hidden", type: "file", accept: "video/*,audio/*", onChange: handleFile }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "browse-button", onClick: chooseLocalFile, children: "\u9009\u62E9\u6587\u4EF6" })
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "field-help", children: "\u81EA\u52A8\u8BC6\u522B\u6765\u6E90\uFF1B\u7F51\u9875\u9884\u89C8\u4F7F\u7528\u4E34\u65F6\u6587\u4EF6\u5730\u5740\uFF0CAgent \u5904\u7406\u672C\u5730\u6587\u4EF6\u65F6\u8BF7\u586B\u5199\u5B8C\u6574\u8DEF\u5F84\u3002" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "source-requirements", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: capabilities.ffmpeg?.available ? "ok" : "" }),
-                    " FFmpeg ",
-                    capabilities.ffmpeg?.available ? "\u5C31\u7EEA" : "\u5F85\u68C0\u6D4B"
-                  ] }),
-                  sourceKind.label === "Bilibili" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: capabilities.yutto?.available ? "ok" : "missing" }),
-                    " yutto ",
-                    capabilities.yutto?.available ? capabilities.yutto.detail ?? "\u5C31\u7EEA" : "\u672A\u53D1\u73B0"
-                  ] }),
-                  (sourceKind.label === "YouTube" || sourceKind.label === "yt-dlp \u94FE\u63A5") && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: capabilities["yt-dlp"]?.available ? "ok" : "missing" }),
-                    " yt-dlp ",
-                    capabilities["yt-dlp"]?.available ? "\u5C31\u7EEA" : "\u672A\u53D1\u73B0"
-                  ] })
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "field-grid", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "output-path", children: "\u8F93\u51FA\u6587\u4EF6\u5939" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "output-path", value: outputPath, onChange: (event) => setOutputPath(event.target.value) })
-                  ] }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "quality", children: "\u4E0B\u8F7D\u753B\u8D28" }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { id: "quality", defaultValue: "best", children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "best", children: "\u6700\u9AD8\u53EF\u7528\u753B\u8D28" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "1080", children: "1080P" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "720", children: "720P" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "source", children: "\u4FDD\u7559\u672C\u5730\u6E90\u6587\u4EF6" })
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", { children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { className: videoReady ? "complete" : "current", children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "1" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u7D20\u6750\u4E0E\u8F93\u51FA" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u586B\u5199\u89C6\u9891\u4F4D\u7F6E\u3001\u8F93\u51FA\u6587\u4EF6\u5939\u548C\u683C\u5F0F" })
+                      ] }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: videoReady ? "\u5DF2\u5B8C\u6210" : "\u4ECE\u8FD9\u91CC\u5F00\u59CB" })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { className: "configured", children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "2" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u542C\u5199\u65B9\u6848" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("small", { children: [
+                          transcriptionPreset.label,
+                          " \xB7 ",
+                          transcriptionModel,
+                          " \xB7 ",
+                          transcriptionLanguage === "ja" ? "\u65E5\u8BED" : transcriptionLanguage
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: applyRecommendedTranscriptionSetup, disabled: transcriptionInstallBusy, children: "\u4F7F\u7528\u63A8\u8350\u65B9\u6848" })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", { className: transcriptionRequestedReady ? "complete" : transcriptionEnvironment ? "attention" : "pending", children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "3" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u9879\u76EE\u73AF\u5883" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionRequestedReady ? "\u8FD0\u884C\u5E93\u3001\u6A21\u578B\u548C\u5A92\u4F53\u5DE5\u5177\u5DF2\u5C31\u7EEA" : transcriptionEnvironment ? `\u53D1\u73B0 ${transcriptionEnvironmentIssueCount} \u4E2A\u5F85\u5904\u7406\u9879` : "\u68C0\u67E5\u540E\u7531\u672C\u5730\u73AF\u5883 Agent \u5904\u7406\u7F3A\u9879" })
+                      ] }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionRequestedReady ? "\u5DF2\u5B8C\u6210" : transcriptionEnvironment ? "\u9700\u8981\u5904\u7406" : "\u5F85\u68C0\u67E5" })
                     ] })
                   ] })
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "format-row", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "field-label", children: "\u8F93\u51FA\u683C\u5F0F" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "format-chips", children: ["srt", "ass", "mkv", "mp4"].map((format) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { className: formats.includes(format) ? "selected" : "", onClick: () => toggleFormat(format), children: [
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "check", children: formats.includes(format) ? "\u2713" : "" }),
-                    format.toUpperCase()
-                  ] }, format)) })
+                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "source-setup-block source-media-block", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "source-setup-block-heading", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "1" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u586B\u5199\u7D20\u6750\u4E0E\u8F93\u51FA" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5148\u786E\u5B9A\u8F93\u5165\u548C\u4EA4\u4ED8\u683C\u5F0F" })
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "video-source", children: "\u89C6\u9891\u4F4D\u7F6E" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "source-input-row", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "video-source", value: source, onChange: (event) => {
+                      setSource(event.target.value);
+                      setResearchPreview("");
+                      setTranscriptionTestStage("idle");
+                      setTranscriptionTestDetail("\u89C6\u9891\u5DF2\u53D8\u5316\uFF1B\u53EF\u6309\u9700\u6D4B\u8BD5\u771F\u5B9E\u97F3\u9891");
+                      setTranscriptionTestResult(null);
+                    }, placeholder: "\u7C98\u8D34 Bilibili / YouTube / \u5176\u4ED6\u94FE\u63A5\uFF0C\u6216\u8F93\u5165\u672C\u5730\u8DEF\u5F84" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { ref: fileInputRef, className: "visually-hidden", type: "file", accept: "video/*,audio/*", onChange: handleFile }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "browse-button", onClick: chooseLocalFile, children: "\u9009\u62E9\u6587\u4EF6" })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "field-help", children: "\u81EA\u52A8\u8BC6\u522B\u6765\u6E90\uFF1B\u7F51\u9875\u9884\u89C8\u4F7F\u7528\u4E34\u65F6\u6587\u4EF6\u5730\u5740\uFF0CAgent \u5904\u7406\u672C\u5730\u6587\u4EF6\u65F6\u8BF7\u586B\u5199\u5B8C\u6574\u8DEF\u5F84\u3002" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "source-requirements", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: capabilities.ffmpeg?.available ? "ok" : "" }),
+                      " FFmpeg ",
+                      capabilities.ffmpeg?.available ? "\u5C31\u7EEA" : "\u5F85\u68C0\u6D4B"
+                    ] }),
+                    sourceKind.label === "Bilibili" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: capabilities.yutto?.available ? "ok" : "missing" }),
+                      " yutto ",
+                      capabilities.yutto?.available ? capabilities.yutto.detail ?? "\u5C31\u7EEA" : "\u672A\u53D1\u73B0"
+                    ] }),
+                    (sourceKind.label === "YouTube" || sourceKind.label === "yt-dlp \u94FE\u63A5") && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: capabilities["yt-dlp"]?.available ? "ok" : "missing" }),
+                      " yt-dlp ",
+                      capabilities["yt-dlp"]?.available ? "\u5C31\u7EEA" : "\u672A\u53D1\u73B0"
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "field-grid", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "output-path", children: "\u8F93\u51FA\u6587\u4EF6\u5939" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "output-path", value: outputPath, onChange: (event) => setOutputPath(event.target.value) })
+                    ] }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "field-label", htmlFor: "quality", children: "\u4E0B\u8F7D\u753B\u8D28" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", { id: "quality", defaultValue: "best", children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "best", children: "\u6700\u9AD8\u53EF\u7528\u753B\u8D28" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "1080", children: "1080P" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "720", children: "720P" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "source", children: "\u4FDD\u7559\u672C\u5730\u6E90\u6587\u4EF6" })
+                      ] })
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "format-row", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "field-label", children: "\u8F93\u51FA\u683C\u5F0F" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "format-chips", children: ["srt", "ass", "mkv", "mp4"].map((format) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { className: formats.includes(format) ? "selected" : "", onClick: () => toggleFormat(format), children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "check", children: formats.includes(format) ? "\u2713" : "" }),
+                      format.toUpperCase()
+                    ] }, format)) })
+                  ] })
                 ] }),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-config", children: [
                   /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-heading", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "2" }),
                       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "TRANSCRIPTION" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "\u539F\u6587\u542C\u5199\u5F15\u64CE" }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { children: "\u9009\u62E9\u539F\u6587\u542C\u5199\u65B9\u6848" }),
                       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: "\u542C\u5199\u548C\u7FFB\u8BD1\u662F\u4E24\u5957\u6A21\u578B\u3002\u8FD9\u91CC\u51B3\u5B9A\u8C01\u6765\u542C\u97F3\u9891\u3001\u65F6\u95F4\u6233\u505A\u5230\u591A\u7EC6\uFF0C\u4EE5\u53CA\u662F\u5426\u533A\u5206\u8BF4\u8BDD\u4EBA\u3002" })
                     ] }),
                     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
@@ -25492,17 +25527,22 @@
                   transcriptionMode === "api" && !transcriptionApiKey.trim() && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "transcription-warning", children: "\u5F00\u59CB\u524D\u9700\u8981\u586B\u5199\u542C\u5199 API Key\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u590D\u7528\u7FFB\u8BD1\u6A21\u578B\u7684\u5BC6\u94A5\uFF0C\u907F\u514D\u8BEF\u4F20\u3002" }),
                   /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "transcription-environment", children: [
                     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-environment-heading", children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "3" }),
                       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "ENVIRONMENT CHECK" }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u68C0\u67E5\u4F9D\u8D56\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u4E0B\u8F7D" }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u68C0\u67E5\u53EA\u8BFB\u53D6\u672C\u673A\u72B6\u6001\uFF0C\u4E0D\u4F1A\u8054\u7F51\u3001\u4E0D\u5B89\u88C5\u3002\u4E0B\u8F7D\u9700\u53E6\u884C\u52FE\u9009\u5E76\u786E\u8BA4\u3002" })
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "PROJECT ENVIRONMENT" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u68C0\u67E5\u5E76\u914D\u7F6E\u9879\u76EE\u73AF\u5883" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5148\u53EA\u8BFB\u68C0\u67E5\uFF1B\u786E\u8BA4\u4E0B\u8F7D\u540E\uFF0C\u672C\u5730\u73AF\u5883 Agent \u624D\u4F1A\u5728\u9879\u76EE\u76EE\u5F55\u4E2D\u4FEE\u590D\u3002" })
                       ] }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "secondary-button", onClick: () => void checkTranscriptionEnvironment(), disabled: transcriptionCheckBusy || transcriptionInstallBusy, children: transcriptionCheckBusy ? "\u68C0\u67E5\u4E2D\u2026" : transcriptionEnvironment ? "\u91CD\u65B0\u68C0\u67E5" : "\u68C0\u67E5\u5F53\u524D\u73AF\u5883" })
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: `environment-check-button ${transcriptionEnvironment ? "checked" : "primary"}`, onClick: () => void checkTranscriptionEnvironment(), disabled: transcriptionCheckBusy || transcriptionInstallBusy, children: transcriptionCheckBusy ? "\u6B63\u5728\u68C0\u67E5\u9879\u76EE\u73AF\u5883\u2026" : transcriptionEnvironment ? "\u2713 \u91CD\u65B0\u68C0\u67E5" : "\u68C0\u67E5\u9879\u76EE\u73AF\u5883 \u2192" })
                     ] }),
-                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("details", { className: "transcription-environment-details", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("details", { className: `transcription-environment-details ${transcriptionCheckError ? "error" : transcriptionEnvironment ? transcriptionRequestedReady ? "ready" : "attention" : "idle"}`, children: [
                       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("summary", { children: [
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: transcriptionCheckError ? "\u68C0\u67E5\u5931\u8D25 \xB7 \u5C55\u5F00\u67E5\u770B" : transcriptionEnvironment ? transcriptionEnvironment.ready ? "\u73AF\u5883\u5DF2\u5C31\u7EEA \xB7 \u67E5\u770B\u8BE6\u60C5" : "\u53D1\u73B0\u7F3A\u5931\u9879 \xB7 \u5C55\u5F00\u5904\u7406" : "\u73AF\u5883\u4F4D\u7F6E\u3001\u4F9D\u8D56\u4E0E\u4E0B\u8F7D\u9009\u9879" }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u6309\u9700\u5C55\u5F00" })
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: transcriptionCheckError || transcriptionEnvironment && !transcriptionRequestedReady ? "!" : transcriptionRequestedReady ? "\u2713" : "3" }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionCheckError ? "\u73AF\u5883\u68C0\u67E5\u5931\u8D25" : transcriptionEnvironment ? transcriptionRequestedReady ? "\u9879\u76EE\u73AF\u5883\u5DF2\u7ECF\u5C31\u7EEA" : `\u53D1\u73B0 ${transcriptionEnvironmentIssueCount} \u4E2A\u73AF\u5883\u7F3A\u5931\u9879` : "\u5C1A\u672A\u68C0\u67E5\u9879\u76EE\u73AF\u5883" }),
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionCheckError ? "\u5C55\u5F00\u67E5\u770B\u9519\u8BEF\u5E76\u91CD\u8BD5" : transcriptionEnvironment ? transcriptionRequestedReady ? "\u5C55\u5F00\u67E5\u770B\u8FD0\u884C\u76EE\u5F55\u548C\u7248\u672C" : `\u5C55\u5F00\u540E\u8BA9 ${engineVerified ? activeEngineLabel : "\u7B2C\u4E00\u9875 AI"} \u5728\u9879\u76EE\u76EE\u5F55\u4E2D\u5904\u7406` : "\u70B9\u51FB\u4E0A\u65B9\u84DD\u8272\u6309\u94AE\u5F00\u59CB\u53EA\u8BFB\u68C0\u67E5" })
+                        ] }),
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment && !transcriptionRequestedReady ? "\u7ACB\u5373\u5904\u7406 \u2192" : "\u67E5\u770B\u8BE6\u60C5" })
                       ] }),
                       transcriptionMode === "local" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-environment-location", children: [
                         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
@@ -25522,147 +25562,191 @@
                         "\u5C1A\u672A\u68C0\u67E5\u3002\u5148\u9009\u62E9\u542C\u5199\u670D\u52A1\u3001\u8D28\u91CF\u548C\u6A21\u578B\uFF0C\u518D\u68C0\u67E5\u8FD9\u53F0\u7535\u8111\u662F\u5426\u5DF2\u7ECF\u5177\u5907\u6240\u9700\u5185\u5BB9\u3002"
                       ] }),
                       transcriptionEnvironment && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "transcription-dependency-list", children: transcriptionEnvironment.components.map((component) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `transcription-dependency ${component.status}`, children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: component.status === "ready" ? "\u2713" : component.status === "optional" ? "\u2014" : "!" }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: component.label }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: component.detail })
-                          ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: component.status === "ready" ? "\u5DF2\u5B58\u5728" : component.status === "optional" ? "\u672A\u542F\u7528" : component.status === "degraded" ? "\u5F85\u914D\u7F6E" : "\u7F3A\u5931" })
-                        ] }, component.id)) }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-resource-grid", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u672C\u6B21\u5F85\u4E0B\u8F7D" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.pendingDownloadLabel || transcriptionEnvironment.resources.downloadLabel })
-                          ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5EFA\u8BAE\u53EF\u7528\u5185\u5B58" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.recommendedMemoryLabel })
-                          ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: transcriptionEnvironment.resources.memorySufficient ? "ok" : "warn", children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u672C\u673A\u5185\u5B58" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.systemMemoryLabel })
-                          ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: transcriptionEnvironment.resources.diskSufficient ? "ok" : "warn", children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u7F13\u5B58\u76D8\u53EF\u7528" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.freeDiskLabel })
-                          ] })
-                        ] }),
-                        transcriptionEnvironment.managedRuntime && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `transcription-managed-runtime ${transcriptionEnvironment.managedRuntime.supported ? "supported" : "fallback"}`, children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-managed-runtime-title", children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "APP-MANAGED RUNTIME" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u5E94\u7528\u6258\u7BA1\u8FD0\u884C\u65F6" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.platform })
-                          ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-managed-runtime-grid", children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: transcriptionEnvironment.managedRuntime.uvReady ? "ready" : "pending" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5DE5\u5177\u94FE" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
-                                "uv ",
-                                transcriptionEnvironment.managedRuntime.uvVersion
+                        transcriptionEnvironment.diagnostics && !transcriptionEnvironment.diagnostics.healthy && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: `environment-agent-console ${transcriptionInstallBusy ? "running" : "idle"}`, "aria-live": "polite", children: [
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", {}),
+                                " LOCAL ENV AGENT"
                               ] }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.uvReady ? "\u5DF2\u5C31\u7EEA" : transcriptionEnvironment.managedRuntime.supported ? "\u9996\u6B21\u914D\u7F6E\u81EA\u52A8\u4E0B\u8F7D" : "\u517C\u5BB9\u56DE\u9000" })
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u7531\u7B2C\u4E00\u9875 AI \u914D\u7F6E\u9879\u76EE\u73AF\u5883" })
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: transcriptionEnvironment.managedRuntime.pythonReady ? "ready" : "pending" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "Python" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.managedRuntime.pythonVersion }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.pythonReady ? "\u72EC\u7ACB\u73AF\u5883\u5DF2\u5C31\u7EEA" : "\u7531\u7A0B\u5E8F\u81EA\u52A8\u51C6\u5907" })
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: engineVerified ? `${activeEngineLabel} \xB7 \u5DF2\u8FDE\u63A5` : "\u7B49\u5F85\u7B2C\u4E00\u9875\u6A21\u578B\u901A\u8FC7\u6D4B\u8BD5" })
+                          ] }),
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "environment-agent-scope", children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u5DE5\u4F5C\u76EE\u5F55" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { title: transcriptionEnvironment.environmentRoot, children: transcriptionEnvironment.environmentRoot }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("b", { children: "\u4EC5\u9879\u76EE\u76EE\u5F55" })
+                          ] }),
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "environment-agent-terminal", children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "command", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("b", { children: "$" }),
+                              " gaku-env-agent inspect --harness transcription-environment-v1"
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "ready" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u73AF\u5883\u9694\u79BB" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "ASR / \u8BF4\u8BDD\u4EBA\u5206\u79BB\u72EC\u7ACB" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: "\u5931\u8D25\u4E0D\u8986\u76D6\u53EF\u7528\u73AF\u5883" })
+                            transcriptionInstallEvents.length > 0 ? transcriptionInstallEvents.slice(-8).map((event, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: event.kind, children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: event.kind === "done" ? "\u2713" : event.kind === "error" ? "\xD7" : "\u203A" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: event.text })
+                            ] }, `${event.at}-${index}`)) : transcriptionEnvironment.diagnostics.issues.filter((issue) => issue.id !== "last-install").map((issue) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "pending", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "\u203A" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: issue.label }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: issue.repair })
+                              ] })
+                            ] }, issue.id)),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "guard", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "\u2713" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Harness \u5DF2\u52A0\u8F7D\uFF1A\u6A21\u578B\u53EA\u9009\u62E9\u56FA\u5B9A\u4FEE\u590D\u9879\uFF0C\u7A0B\u5E8F\u8D1F\u8D23\u4E0B\u8F7D\u3001\u6821\u9A8C\u3001\u539F\u5B50\u66FF\u6362\u4E0E\u6700\u7EC8\u590D\u68C0" })
                             ] })
                           ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
-                            transcriptionEnvironment.managedRuntime.isolation,
-                            "\u3002\u7248\u672C\u6307\u7EB9\uFF1AASR ",
-                            transcriptionEnvironment.managedRuntime.baseEnvironmentKey,
-                            " \xB7 \u5206\u79BB\u5F15\u64CE ",
-                            transcriptionEnvironment.managedRuntime.diarizationEnvironmentKey
-                          ] })
-                        ] }),
-                        transcriptionEnvironment.storageLayout && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `transcription-storage-layout ${transcriptionEnvironment.storageLayout.mode}`, children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: transcriptionEnvironment.storageLayout.mode === "split" ? "\u5DF2\u81EA\u52A8\u4FDD\u62A4" : "\u9879\u76EE\u5185\u8FD0\u884C" }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.storageLayout.mode === "split" ? "\u5916\u63A5\u76D8\u4FDD\u5B58\u6A21\u578B\uFF0C\u672C\u673A\u4FDD\u5B58\u8FD0\u884C\u5E93" : "\u8FD0\u884C\u5E93\u548C\u6A21\u578B\u90FD\u53EF\u5B89\u5168\u653E\u5728\u9879\u76EE\u76EE\u5F55" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("small", { children: [
-                              transcriptionEnvironment.storageLayout.filesystem.toUpperCase(),
-                              " \xB7 ",
-                              transcriptionEnvironment.storageLayout.reason
-                            ] })
-                          ] })
-                        ] }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: `transcription-recommendation ${transcriptionRequestedReady ? "ready" : "attention"}`, children: [
-                          transcriptionRequestedReady ? "\u2713 " : "",
-                          transcriptionEnvironment.recommendation
-                        ] }),
-                        transcriptionDiarizationNeedsSetup && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "transcription-enhancement-action", "aria-live": "polite", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "OPTIONAL ENHANCEMENT" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX \u5C1A\u672A\u51C6\u5907" : "WhisperX / pyannote \u5C1A\u672A\u51C6\u5907" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? `\u5C06\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u6A21\u578B\u5E76\u521B\u5EFA\u72EC\u7ACB\u672C\u5730\u73AF\u5883\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python` : "\u9700\u8981 Hugging Face \u6A21\u578B\u6743\u9650\uFF1B\u53EF\u6253\u5F00\u914D\u7F6E\u586B\u5199 Token \u5E76\u786E\u8BA4\u6761\u6B3E" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { title: transcriptionEnvironment.diarizationRuntimePath, children: transcriptionEnvironment.diarizationRuntimePath })
-                          ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-enhancement-actions", children: [
-                            transcriptionDiarizationEngine === "sherpa_onnx" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void prepareDiarizationEnvironment(), disabled: transcriptionInstallBusy || transcriptionEnvironment.installationCapabilities?.diarization === false || !transcriptionEnvironmentRoot.trim(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u914D\u7F6E\u2026" : `\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u5E76\u914D\u7F6E` }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => {
-                              setTranscriptionInstallDiarization(true);
-                              setTranscriptionInstallOpen(true);
-                              window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
-                            }, children: "\u6253\u5F00\u914D\u7F6E\u4E0E\u6388\u6743" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: () => void continueWithoutDiarization(), disabled: transcriptionInstallBusy, children: "\u6682\u4E0D\u4F7F\u7528\u8BF4\u8BDD\u4EBA\u5206\u79BB" })
-                          ] })
-                        ] }),
-                        transcriptionEnvironment.diagnostics && !transcriptionEnvironment.diagnostics.healthy && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "transcription-diagnostics", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-diagnostics-heading", children: [
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("footer", { children: [
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "FAILURE ANALYSIS" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u672C\u6B21\u914D\u7F6E\u4E3A\u4EC0\u4E48\u6CA1\u6709\u5B8C\u6210" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionEnvironment.diagnostics.summary })
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionInstallBusy ? transcriptionInstallStage || "\u73AF\u5883 Agent \u6B63\u5728\u5DE5\u4F5C" : `\u51C6\u5907\u5904\u7406 ${transcriptionEnvironmentIssueCount} \u4E2A\u7F3A\u5931\u9879` }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u542F\u52A8\u524D\u4ECD\u4F1A\u786E\u8BA4\u4E0B\u8F7D\u4F53\u79EF\u548C\u76EE\u5F55\uFF1B\u4E0D\u6267\u884C\u6A21\u578B\u751F\u6210\u7684 Shell\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python\u3002" })
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-diagnostics-actions", children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void autoPrepareTranscriptionWithSelectedEngine(), disabled: !engineVerified || transcriptionInstallBusy || !transcriptionEnvironmentRoot.trim(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u914D\u7F6E\u2026" : engineVerified ? "\u8BA9\u7B2C\u4E00\u6B65\u6A21\u578B\u81EA\u52A8\u914D\u7F6E" : "\u5148\u901A\u8FC7\u6A21\u578B\u6D4B\u8BD5" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: askModelToDiagnoseTranscription, disabled: !engineVerified || transcriptionDiagnosisBusy, children: transcriptionDiagnosisBusy ? "\u6A21\u578B\u6B63\u5728\u5206\u6790\u2026" : "\u53EA\u5206\u6790\u539F\u56E0" })
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void autoPrepareTranscriptionWithSelectedEngine(), disabled: !engineVerified || transcriptionInstallBusy || !transcriptionEnvironmentRoot.trim(), children: transcriptionInstallBusy ? `${Math.round(transcriptionInstallProgress)}% \xB7 \u6B63\u5728\u914D\u7F6E` : engineVerified ? "\u542F\u52A8\u672C\u5730\u73AF\u5883 Agent" : "\u5148\u5B8C\u6210\u7B2C\u4E00\u9875\u6A21\u578B\u6D4B\u8BD5" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: askModelToDiagnoseTranscription, disabled: !engineVerified || transcriptionDiagnosisBusy, children: transcriptionDiagnosisBusy ? "\u5206\u6790\u4E2D\u2026" : "\u53EA\u5206\u6790\u539F\u56E0" })
                             ] })
                           ] }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "transcription-diagnostic-issues", children: transcriptionEnvironment.diagnostics.issues.map((issue) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", { children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: "!" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: issue.label }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: issue.detail }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: issue.repair })
-                            ] })
-                          ] }, issue.id)) }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "transcription-ai-safety", children: "\u6A21\u578B\u53EA\u8BFB\u53D6\u8131\u654F\u68C0\u67E5\u7ED3\u679C\u5E76\u89E3\u91CA\u539F\u56E0\uFF0C\u4E0D\u4F1A\u751F\u6210\u6216\u6267\u884C\u5B89\u88C5\u547D\u4EE4\uFF1B\u4FEE\u590D\u4ECD\u7531\u56FA\u5B9A\u7684\u5B89\u5168\u5B89\u88C5\u6D41\u7A0B\u5B8C\u6210\u3002" }),
-                          transcriptionDiagnosis && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-ai-advice", children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "MODEL ADVICE" }),
+                          transcriptionDiagnosis && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "environment-agent-advice", children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "AI PLAN" }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: transcriptionDiagnosis })
+                          ] }),
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("details", { className: "environment-technical-diagnostics", children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("summary", { children: "\u67E5\u770B\u6280\u672F\u8BCA\u65AD\u4E0E\u539F\u59CB\u9519\u8BEF" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { children: transcriptionEnvironment.diagnostics.issues.map((issue) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", { children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: issue.label }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", { children: issue.detail }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: issue.repair })
+                            ] }, issue.id)) })
                           ] })
                         ] }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-cache-path", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u57FA\u7840\u8FD0\u884C\u73AF\u5883" }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.runtimePath })
-                        ] }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-cache-path", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u8BF4\u8BDD\u4EBA\u5206\u79BB\u73AF\u5883" }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.diarizationRuntimePath || "\u542F\u7528\u540E\u81EA\u52A8\u521B\u5EFA" })
-                        ] }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-cache-path", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u6A21\u578B\u7F13\u5B58" }),
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.cachePath })
+                        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("details", { className: "environment-runtime-details", children: [
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("summary", { children: "\u67E5\u770B\u4F9D\u8D56\u6E05\u5355\u3001\u8D44\u6E90\u7528\u91CF\u548C\u8FD0\u884C\u76EE\u5F55" }),
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "transcription-dependency-list", children: transcriptionEnvironment.components.map((component) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `transcription-dependency ${component.status}`, children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { children: component.status === "ready" ? "\u2713" : component.status === "optional" ? "\u2014" : "!" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: component.label }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: component.detail })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: component.status === "ready" ? "\u5DF2\u5B58\u5728" : component.status === "optional" ? "\u672A\u542F\u7528" : component.status === "degraded" ? "\u5F85\u914D\u7F6E" : "\u7F3A\u5931" })
+                            ] }, component.id)) }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-resource-grid", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u672C\u6B21\u5F85\u4E0B\u8F7D" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.pendingDownloadLabel || transcriptionEnvironment.resources.downloadLabel })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5EFA\u8BAE\u53EF\u7528\u5185\u5B58" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.recommendedMemoryLabel })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: transcriptionEnvironment.resources.memorySufficient ? "ok" : "warn", children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u672C\u673A\u5185\u5B58" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.systemMemoryLabel })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: transcriptionEnvironment.resources.diskSufficient ? "ok" : "warn", children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u7F13\u5B58\u76D8\u53EF\u7528" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.resources.freeDiskLabel })
+                              ] })
+                            ] }),
+                            transcriptionEnvironment.managedRuntime && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `transcription-managed-runtime ${transcriptionEnvironment.managedRuntime.supported ? "supported" : "fallback"}`, children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-managed-runtime-title", children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "APP-MANAGED RUNTIME" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u5E94\u7528\u6258\u7BA1\u8FD0\u884C\u65F6" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.platform })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-managed-runtime-grid", children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: transcriptionEnvironment.managedRuntime.uvReady ? "ready" : "pending" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5DE5\u5177\u94FE" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
+                                    "uv ",
+                                    transcriptionEnvironment.managedRuntime.uvVersion
+                                  ] }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.uvReady ? "\u5DF2\u5C31\u7EEA" : transcriptionEnvironment.managedRuntime.supported ? "\u9996\u6B21\u914D\u7F6E\u81EA\u52A8\u4E0B\u8F7D" : "\u517C\u5BB9\u56DE\u9000" })
+                                ] }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: transcriptionEnvironment.managedRuntime.pythonReady ? "ready" : "pending" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "Python" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.managedRuntime.pythonVersion }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.pythonReady ? "\u72EC\u7ACB\u73AF\u5883\u5DF2\u5C31\u7EEA" : "\u7531\u7A0B\u5E8F\u81EA\u52A8\u51C6\u5907" })
+                                ] }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: transcriptionEnvironment.managedRuntime.nativeToolsReady ? "ready" : "pending" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u5A92\u4F53\u5DE5\u5177" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "FFmpeg / FFprobe" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: transcriptionEnvironment.managedRuntime.nativeToolsReady ? "\u9879\u76EE\u8FD0\u884C\u65F6\u5DF2\u5C31\u7EEA" : `\u56FA\u5B9A\u7248\u672C ${transcriptionEnvironment.managedRuntime.nativeToolsVersion || "\u5F85\u51C6\u5907"}` })
+                                ] }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "ready" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u73AF\u5883\u9694\u79BB" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "ASR / \u8BF4\u8BDD\u4EBA\u5206\u79BB\u72EC\u7ACB" }),
+                                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { children: "\u5931\u8D25\u4E0D\u8986\u76D6\u53EF\u7528\u73AF\u5883" })
+                                ] })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
+                                transcriptionEnvironment.managedRuntime.isolation,
+                                "\u3002\u7248\u672C\u6307\u7EB9\uFF1AASR ",
+                                transcriptionEnvironment.managedRuntime.baseEnvironmentKey,
+                                " \xB7 \u5206\u79BB\u5F15\u64CE ",
+                                transcriptionEnvironment.managedRuntime.diarizationEnvironmentKey
+                              ] })
+                            ] }),
+                            transcriptionEnvironment.storageLayout && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: `transcription-storage-layout ${transcriptionEnvironment.storageLayout.mode}`, children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: transcriptionEnvironment.storageLayout.mode === "split" ? "\u5DF2\u81EA\u52A8\u4FDD\u62A4" : "\u9879\u76EE\u5185\u8FD0\u884C" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionEnvironment.storageLayout.mode === "split" ? "\u5916\u63A5\u76D8\u4FDD\u5B58\u6A21\u578B\uFF0C\u672C\u673A\u4FDD\u5B58\u8FD0\u884C\u5E93" : "\u8FD0\u884C\u5E93\u548C\u6A21\u578B\u90FD\u53EF\u5B89\u5168\u653E\u5728\u9879\u76EE\u76EE\u5F55" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("small", { children: [
+                                  transcriptionEnvironment.storageLayout.filesystem.toUpperCase(),
+                                  " \xB7 ",
+                                  transcriptionEnvironment.storageLayout.reason
+                                ] })
+                              ] })
+                            ] }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: `transcription-recommendation ${transcriptionRequestedReady ? "ready" : "attention"}`, children: [
+                              transcriptionRequestedReady ? "\u2713 " : "",
+                              transcriptionEnvironment.recommendation
+                            ] }),
+                            transcriptionDiarizationNeedsSetup && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "transcription-enhancement-action", "aria-live": "polite", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "OPTIONAL ENHANCEMENT" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX \u5C1A\u672A\u51C6\u5907" : "WhisperX / pyannote \u5C1A\u672A\u51C6\u5907" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionDiarizationEngine === "sherpa_onnx" ? `\u5C06\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u6A21\u578B\u5E76\u521B\u5EFA\u72EC\u7ACB\u672C\u5730\u73AF\u5883\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python` : "\u9700\u8981 Hugging Face \u6A21\u578B\u6743\u9650\uFF1B\u53EF\u6253\u5F00\u914D\u7F6E\u586B\u5199 Token \u5E76\u786E\u8BA4\u6761\u6B3E" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { title: transcriptionEnvironment.diarizationRuntimePath, children: transcriptionEnvironment.diarizationRuntimePath })
+                              ] }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-enhancement-actions", children: [
+                                transcriptionDiarizationEngine === "sherpa_onnx" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => void prepareDiarizationEnvironment(), disabled: transcriptionInstallBusy || transcriptionEnvironment.installationCapabilities?.diarization === false || !transcriptionEnvironmentRoot.trim(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u914D\u7F6E\u2026" : `\u4E0B\u8F7D ${transcriptionEnvironment.resources.diarizationDownloadLabel || "\u7EA6 47 MB"} \u5E76\u914D\u7F6E` }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "primary", onClick: () => {
+                                  setTranscriptionInstallDiarization(true);
+                                  setTranscriptionInstallOpen(true);
+                                  window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+                                }, children: "\u6253\u5F00\u914D\u7F6E\u4E0E\u6388\u6743" }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", onClick: () => void continueWithoutDiarization(), disabled: transcriptionInstallBusy, children: "\u6682\u4E0D\u4F7F\u7528\u8BF4\u8BDD\u4EBA\u5206\u79BB" })
+                              ] })
+                            ] }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-cache-path", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u57FA\u7840\u8FD0\u884C\u73AF\u5883" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.runtimePath })
+                            ] }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-cache-path", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u8BF4\u8BDD\u4EBA\u5206\u79BB\u73AF\u5883" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.diarizationRuntimePath || "\u542F\u7528\u540E\u81EA\u52A8\u521B\u5EFA" })
+                            ] }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-cache-path", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u6A21\u578B\u7F13\u5B58" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.cachePath })
+                            ] })
+                          ] })
                         ] }),
                         transcriptionMode === "local" && transcriptionProvider === "faster_whisper" && transcriptionNeedsEnvironmentSetup && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "transcription-download-panel", children: [
-                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { className: `transcription-download-toggle ${transcriptionInstallOpen ? "open" : "attention"}`, "aria-expanded": transcriptionInstallOpen, onClick: () => {
+                          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", { className: `transcription-download-toggle ${transcriptionInstallOpen ? "open" : "manual"}`, "aria-expanded": transcriptionInstallOpen, onClick: () => {
                             setTranscriptionInstallOpen((value) => !value);
                             setTranscriptionInstallConfirmed(false);
                           }, children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { "aria-hidden": "true", children: transcriptionInstallOpen ? "\u2713" : "\u2193" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { "aria-hidden": "true", children: transcriptionInstallOpen ? "\u2713" : "\u2699" }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionInstallOpen ? "\u6536\u8D77\u914D\u7F6E\u9009\u9879" : transcriptionDiarizationNeedsSetup ? "\u914D\u7F6E\u8BF4\u8BDD\u4EBA\u5206\u79BB" : "\u7ACB\u5373\u914D\u7F6E\u7F3A\u5931\u73AF\u5883" }),
-                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionInstallOpen ? "\u914D\u7F6E\u5185\u5BB9\u5DF2\u5C55\u5F00\uFF0C\u53EF\u5728\u4E0B\u65B9\u786E\u8BA4" : transcriptionDiarizationNeedsSetup ? "\u57FA\u7840\u542C\u5199\u4E0D\u4F1A\u91CD\u590D\u5B89\u88C5\uFF1B\u53EA\u8865\u9F50\u5F53\u524D\u589E\u5F3A\u80FD\u529B" : "\u8865\u9F50\u57FA\u7840\u8FD0\u884C\u5E93\uFF0C\u5DF2\u4E0B\u8F7D\u7684\u6A21\u578B\u4E0D\u4F1A\u91CD\u590D\u4E0B\u8F7D" })
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: transcriptionInstallOpen ? "\u6536\u8D77\u624B\u52A8\u914D\u7F6E" : transcriptionDiarizationNeedsSetup ? "\u624B\u52A8\u914D\u7F6E\u8BF4\u8BDD\u4EBA\u5206\u79BB" : "\u624B\u52A8\u9009\u62E9\u914D\u7F6E\u9879" }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionInstallOpen ? "\u914D\u7F6E\u5185\u5BB9\u5DF2\u5C55\u5F00\uFF0C\u53EF\u5728\u4E0B\u65B9\u786E\u8BA4" : "\u672C\u5730\u73AF\u5883 Agent \u662F\u63A8\u8350\u65B9\u5F0F\uFF1B\u719F\u6089\u4F9D\u8D56\u65F6\u4E5F\u53EF\u4EE5\u624B\u52A8\u9009\u62E9\u56FA\u5B9A\u767D\u540D\u5355\u9879" })
                             ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("em", { "aria-hidden": "true", children: transcriptionInstallOpen ? "\u2303" : "\u2192" })
                           ] }),
@@ -25670,7 +25754,7 @@
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { children: [
                               "\u6A21\u578B\u4E0E\u9879\u76EE\u6570\u636E\u4FDD\u5B58\u5230 ",
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("code", { children: transcriptionEnvironment.environmentRoot }),
-                              "\uFF1BPython \u8FD0\u884C\u5E93\u7531\u7A0B\u5E8F\u6309\u6587\u4EF6\u7CFB\u7EDF\u81EA\u52A8\u653E\u7F6E\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python\u3002\u5F53\u524D\u5B89\u88C5\u65B9\u5F0F\uFF1A",
+                              "\uFF1BPython \u4E0E FFmpeg/FFprobe \u7531\u7A0B\u5E8F\u6309\u6587\u4EF6\u7CFB\u7EDF\u653E\u5165\u9879\u76EE\u8FD0\u884C\u76EE\u5F55\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF\u73AF\u5883\u3002\u5F53\u524D\u5B89\u88C5\u65B9\u5F0F\uFF1A",
                               transcriptionEnvironment.installer || "\u81EA\u52A8\u9009\u62E9",
                               "\u3002"
                             ] }),
@@ -25721,6 +25805,19 @@
                                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionModelReady ? "\u6A21\u578B\u5FEB\u7167\u5DF2\u901A\u8FC7\u5B8C\u6574\u6027\u68C0\u67E5\uFF0C\u4E0D\u4F1A\u91CD\u590D\u4E0B\u8F7D" : `\u7EA6 ${transcriptionEnvironment.resources.downloadLabel}\uFF0C\u4FDD\u5B58\u5230\u4E0A\u65B9\u7F13\u5B58\u4F4D\u7F6E` })
                               ] })
                             ] }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u5B89\u88C5\u9879\u76EE\u5A92\u4F53\u5DE5\u5177\u94FE", htmlFor: "install-transcription-media-tools", children: [
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-media-tools", type: "checkbox", checked: transcriptionInstallMediaTools, disabled: transcriptionMediaToolsReady || transcriptionEnvironment.installationCapabilities?.mediaTools === false, onChange: (event) => {
+                                setTranscriptionInstallMediaTools(event.target.checked);
+                                setTranscriptionInstallConfirmed(false);
+                              } }),
+                              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("strong", { children: [
+                                  "FFmpeg / FFprobe \u9879\u76EE\u5DE5\u5177\u94FE",
+                                  transcriptionMediaToolsReady ? " \xB7 \u5DF2\u5C31\u7EEA" : ""
+                                ] }),
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: transcriptionMediaToolsReady ? "\u9879\u76EE\u8FD0\u884C\u76EE\u5F55\u4E2D\u7684\u4E24\u4E2A\u5DE5\u5177\u5747\u5DF2\u901A\u8FC7\u68C0\u67E5\uFF0C\u4E0D\u4F9D\u8D56\u7CFB\u7EDF\u5B89\u88C5" : transcriptionEnvironment.installationCapabilities?.mediaTools === false ? "\u5F53\u524D\u5E73\u53F0\u6682\u672A\u63D0\u4F9B\u9879\u76EE\u6258\u7BA1\u8D44\u4EA7" : `${transcriptionEnvironment.resources.nativeToolsDownloadLabel || "\u7EA6 64 MB"}\uFF1B\u4E0B\u8F7D\u540E\u8FDB\u884C SHA256 \u548C\u542F\u52A8\u6821\u9A8C\uFF0C\u53EA\u5199\u5165\u4E0A\u65B9\u9879\u76EE\u8FD0\u884C\u76EE\u5F55` })
+                              ] })
+                            ] }),
                             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { "aria-label": "\u5B89\u88C5\u672C\u5730\u8BF4\u8BDD\u4EBA\u5206\u79BB", htmlFor: "install-transcription-diarization", children: [
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "install-transcription-diarization", type: "checkbox", checked: transcriptionInstallDiarization, disabled: transcriptionDiarizationReady || transcriptionEnvironment.installationCapabilities?.diarization === false, onChange: (event) => {
                                 setTranscriptionInstallDiarization(event.target.checked);
@@ -25738,10 +25835,10 @@
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { id: "confirm-transcription-install", type: "checkbox", checked: transcriptionInstallConfirmed, onChange: (event) => setTranscriptionInstallConfirmed(event.target.checked) }),
                               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
                                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { children: "\u6211\u5DF2\u786E\u8BA4\u4E0B\u8F7D\u5185\u5BB9\u3001\u4F53\u79EF\u548C\u4FDD\u5B58\u4F4D\u7F6E" }),
-                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u53EA\u6709\u52FE\u9009\u540E\u624D\u5141\u8BB8\u8054\u7F51\u5B89\u88C5\u6216\u4E0B\u8F7D\uFF1B\u4F7F\u7528\u5E94\u7528\u81EA\u5DF1\u7684\u8FD0\u884C\u76EE\u5F55\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF Python" })
+                                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("small", { children: "\u53EA\u6709\u52FE\u9009\u540E\u624D\u5141\u8BB8\u8054\u7F51\u5B89\u88C5\u6216\u4E0B\u8F7D\uFF1BPython \u4E0E\u5A92\u4F53\u5DE5\u5177\u5747\u4F7F\u7528\u5E94\u7528\u81EA\u5DF1\u7684\u8FD0\u884C\u76EE\u5F55\uFF0C\u4E0D\u4FEE\u6539\u7CFB\u7EDF\u73AF\u5883" })
                               ] })
                             ] }),
-                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "primary-install-button", disabled: !transcriptionEnvironment.installable || !transcriptionInstallSelectionSupported || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || !transcriptionHasInstallSelection, onClick: () => void prepareTranscriptionEnvironment(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u51C6\u5907\u2026" : "\u5B89\u5168\u914D\u7F6E\u672C\u5730\u73AF\u5883" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "primary-install-button", disabled: !transcriptionEnvironment.installable || !transcriptionInstallSelectionSupported || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || !transcriptionHasInstallSelection, onClick: () => void prepareTranscriptionEnvironment(), children: transcriptionInstallBusy ? transcriptionInstallStage || "\u6B63\u5728\u51C6\u5907\u2026" : "\u6309\u6240\u9009\u9879\u914D\u7F6E\u9879\u76EE\u73AF\u5883" }),
                             transcriptionInstallEvents.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "transcription-install-log", children: transcriptionInstallEvents.map((event, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: event.kind, children: [
                               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", {}),
                               event.text

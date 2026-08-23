@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -8,12 +8,25 @@ import test from "node:test";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 
-async function startBridge() {
+async function startBridge(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "pss-transcription-test-"));
   const port = 45200 + Math.floor(Math.random() * 800);
+  const environment = { ...process.env, PSS_BRIDGE_PORT: String(port), PSS_JOBS_PATH: path.join(root, "jobs"), PSS_ASR_ROOT: path.join(root, "default-asr"), PSS_ASR_LOCAL_RUNTIME_ROOT: path.join(root, "local-runtimes"), PSS_ASR_PYTHON: path.join(root, "missing-python"), PSS_CODEX_PATH: process.execPath };
+  if (options.withoutMediaTools) environment.PATH = path.join(root, "empty-path");
+  if (options.fakeMediaTools && process.platform !== "win32") {
+    const fakeBin = path.join(root, "fake-media-tools");
+    await mkdir(fakeBin, { recursive: true });
+    const ffprobe = path.join(fakeBin, "ffprobe");
+    const ffmpeg = path.join(fakeBin, "ffmpeg");
+    await writeFile(ffprobe, "#!/bin/sh\nprintf '2\\n'\n", "utf8");
+    await writeFile(ffmpeg, "#!/bin/sh\nfor last in \"$@\"; do :; done\nprintf 'fixture audio' > \"$last\"\n", "utf8");
+    await Promise.all([chmod(ffprobe, 0o755), chmod(ffmpeg, 0o755)]);
+    environment.PSS_FFPROBE_PATH = ffprobe;
+    environment.PSS_FFMPEG_PATH = ffmpeg;
+  }
   const child = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "server.mjs")], {
     cwd: projectRoot,
-    env: { ...process.env, PSS_BRIDGE_PORT: String(port), PSS_JOBS_PATH: path.join(root, "jobs"), PSS_ASR_ROOT: path.join(root, "default-asr"), PSS_ASR_LOCAL_RUNTIME_ROOT: path.join(root, "local-runtimes"), PSS_ASR_PYTHON: path.join(root, "missing-python"), PSS_CODEX_PATH: process.execPath },
+    env: environment,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
@@ -46,7 +59,7 @@ test("health endpoint exposes the bounded job resource policy", async (t) => {
 });
 
 test("transcription check is read-only and reports missing local dependencies", async (t) => {
-  const bridge = await startBridge();
+  const bridge = await startBridge({ withoutMediaTools: true });
   t.after(() => bridge.child.kill());
   const response = await fetch(`http://127.0.0.1:${bridge.port}/api/transcription/check`, {
     method: "POST",
@@ -58,6 +71,7 @@ test("transcription check is read-only and reports missing local dependencies", 
   assert.equal(result.ready, false);
   assert.equal(result.components.find((item) => item.id === "runtime")?.status, "missing");
   assert.equal(result.components.find((item) => item.id === "model")?.status, "missing");
+  assert.equal(result.components.find((item) => item.id === "media-tools")?.status, "missing");
   assert.equal(result.components.find((item) => item.id === "diarization")?.status, "optional");
   assert.match(result.resources.downloadLabel, /GB|MB/);
   assert.equal(result.environmentRoot, path.join(bridge.root, "default-asr"));
@@ -68,6 +82,8 @@ test("transcription check is read-only and reports missing local dependencies", 
   assert.equal(result.storageLayout.mode, result.storageLayout.runtimeCompatible ? "project" : "split");
   assert.equal(result.diagnostics.healthy, false);
   assert.equal(result.diagnostics.repairComponents.runtime, true);
+  assert.equal(result.diagnostics.repairComponents.mediaTools, true);
+  assert.match(result.resources.nativeToolsDownloadLabel, /MB|当前平台未提供/);
 });
 
 test("transcription check respects a user-selected project environment folder", async (t) => {
@@ -180,8 +196,8 @@ test("online real-audio test refuses upload without explicit confirmation", asyn
   assert.match(result.error, /上传|确认/);
 });
 
-test("online real-audio test extracts a bounded local sample and returns transcript", async (t) => {
-  const bridge = await startBridge();
+test("online real-audio test extracts a bounded local sample and returns transcript", { skip: process.platform === "win32" }, async (t) => {
+  const bridge = await startBridge({ fakeMediaTools: true });
   t.after(() => bridge.child.kill());
   const audioPath = path.join(bridge.root, "speech.wav");
   const sampleRate = 16_000;

@@ -262,7 +262,7 @@ type TranscriptionEnvironment = {
   diarizationEngine?: DiarizationEngine;
   installable?: boolean;
   installer?: string;
-  installationCapabilities?: { base: boolean; diarization: boolean; systemPython: string; basePython?: string; managedToolchain?: boolean };
+  installationCapabilities?: { base: boolean; diarization: boolean; mediaTools?: boolean; systemPython: string; basePython?: string; managedToolchain?: boolean };
   managedRuntime?: {
     platform: string;
     supported: boolean;
@@ -272,6 +272,10 @@ type TranscriptionEnvironment = {
     pythonVersion: string;
     pythonReady: boolean;
     pythonPath: string;
+    nativeToolsVersion?: string;
+    nativeToolsReady?: boolean;
+    ffmpegPath?: string;
+    ffprobePath?: string;
     baseEnvironmentKey: string;
     diarizationEnvironmentKey: string;
     isolation: string;
@@ -294,7 +298,7 @@ type TranscriptionEnvironment = {
     healthy: boolean;
     summary: string;
     issues: Array<{ id: string; label: string; detail: string; repair: string }>;
-    repairComponents: { runtime: boolean; model: boolean; diarization: boolean };
+    repairComponents: { runtime: boolean; model: boolean; mediaTools?: boolean; diarization: boolean };
     lastInstall?: { status?: string; stage?: string; progress?: number; error?: string; finishedAt?: string } | null;
   };
   components: Array<{ id: string; label: string; status: "ready" | "missing" | "optional" | "degraded"; detail: string }>;
@@ -302,6 +306,7 @@ type TranscriptionEnvironment = {
     downloadLabel: string;
     pendingDownloadLabel?: string;
     diarizationDownloadLabel?: string;
+    nativeToolsDownloadLabel?: string;
     recommendedMemoryLabel: string;
     systemMemoryLabel: string;
     freeDiskLabel: string;
@@ -902,6 +907,7 @@ export function SubtitleStudio() {
   const [transcriptionInstallOpen, setTranscriptionInstallOpen] = useState(false);
   const [transcriptionInstallRuntime, setTranscriptionInstallRuntime] = useState(true);
   const [transcriptionInstallModel, setTranscriptionInstallModel] = useState(true);
+  const [transcriptionInstallMediaTools, setTranscriptionInstallMediaTools] = useState(true);
   const [transcriptionInstallDiarization, setTranscriptionInstallDiarization] = useState(false);
   const [transcriptionInstallConfirmed, setTranscriptionInstallConfirmed] = useState(false);
   const [transcriptionInstallBusy, setTranscriptionInstallBusy] = useState(false);
@@ -1092,12 +1098,15 @@ export function SubtitleStudio() {
   const transcriptionRequestedReady = Boolean(transcriptionEnvironment && (transcriptionEnvironment.requestedReady ?? transcriptionEnvironment.ready));
   const transcriptionRuntimeReady = transcriptionEnvironment?.components.find((item) => item.id === "runtime")?.status === "ready";
   const transcriptionModelReady = transcriptionEnvironment?.components.find((item) => item.id === "model")?.status === "ready";
+  const transcriptionMediaToolsReady = transcriptionEnvironment?.components.find((item) => item.id === "media-tools")?.status === "ready";
   const transcriptionDiarizationReady = transcriptionEnvironment?.components.find((item) => item.id === "diarization")?.status === "ready";
+  const transcriptionEnvironmentIssueCount = transcriptionEnvironment?.components.filter((item) => item.status === "missing" || item.status === "degraded").length || 0;
   const transcriptionDiarizationNeedsSetup = Boolean(transcriptionEnvironment?.baseReady && transcriptionDiarization && !transcriptionDiarizationReady);
-  const transcriptionNeedsEnvironmentSetup = Boolean(transcriptionEnvironment && (!transcriptionRuntimeReady || !transcriptionModelReady || transcriptionDiarizationNeedsSetup));
-  const transcriptionHasInstallSelection = transcriptionInstallRuntime || transcriptionInstallModel || transcriptionInstallDiarization;
+  const transcriptionNeedsEnvironmentSetup = Boolean(transcriptionEnvironment && (!transcriptionRuntimeReady || !transcriptionModelReady || !transcriptionMediaToolsReady || transcriptionDiarizationNeedsSetup));
+  const transcriptionHasInstallSelection = transcriptionInstallRuntime || transcriptionInstallModel || transcriptionInstallMediaTools || transcriptionInstallDiarization;
   const transcriptionInstallSelectionSupported = Boolean(
     (!transcriptionInstallRuntime && !transcriptionInstallModel || transcriptionEnvironment?.installationCapabilities?.base !== false)
+    && (!transcriptionInstallMediaTools || transcriptionEnvironment?.installationCapabilities?.mediaTools !== false)
     && (!transcriptionInstallDiarization || transcriptionEnvironment?.installationCapabilities?.diarization !== false),
   );
   const researchReady = Boolean(researchPreview.trim());
@@ -1594,6 +1603,15 @@ export function SubtitleStudio() {
     setTranscriptionUploadConfirmed(false);
   }
 
+  function applyTranscriptionEnvironmentResult(data: TranscriptionEnvironment | null | undefined) {
+    setTranscriptionEnvironment(data || null);
+    const repair = data?.diagnostics?.repairComponents || {};
+    setTranscriptionInstallRuntime(Boolean(repair.runtime));
+    setTranscriptionInstallModel(Boolean(repair.model));
+    setTranscriptionInstallMediaTools(Boolean(repair.mediaTools));
+    setTranscriptionInstallDiarization(Boolean(repair.diarization));
+  }
+
   async function checkTranscriptionEnvironment(override?: Record<string, unknown>) {
     setTranscriptionCheckBusy(true);
     setTranscriptionCheckError("");
@@ -1605,14 +1623,10 @@ export function SubtitleStudio() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "无法检查听写环境");
-      setTranscriptionEnvironment(data);
+      applyTranscriptionEnvironmentResult(data);
       if (!transcriptionEnvironmentRoot.trim() && data.environmentRoot) setTranscriptionEnvironmentRoot(String(data.environmentRoot));
       setTranscriptionTestStage("idle");
       setTranscriptionTestResult(null);
-      const repair = data.diagnostics?.repairComponents || {};
-      setTranscriptionInstallRuntime(Boolean(repair.runtime));
-      setTranscriptionInstallModel(Boolean(repair.model));
-      setTranscriptionInstallDiarization(Boolean(repair.diarization));
       setTranscriptionInstallOpen(false);
       setTranscriptionInstallConfirmed(false);
       setTranscriptionDiagnosis("");
@@ -1623,21 +1637,7 @@ export function SubtitleStudio() {
     }
   }
 
-  async function applyRecommendedTranscriptionSetup() {
-    const recommended = {
-      ...transcriptionPayload(),
-      mode: "local",
-      provider: "faster_whisper",
-      model: "turbo",
-      quality: "balanced",
-      language: "ja",
-      diarization: false,
-      wordTimestamps: true,
-      beamSize: transcriptionQualityPresets.balanced.beamSize,
-      secondPass: false,
-      chunkMinutes: 10,
-      environmentRoot: transcriptionEnvironmentRoot.trim(),
-    };
+  function applyRecommendedTranscriptionSetup() {
     setTranscriptionMode("local");
     setTranscriptionProvider("faster_whisper");
     setTranscriptionQuality("balanced");
@@ -1646,12 +1646,12 @@ export function SubtitleStudio() {
     setTranscriptionDiarization(false);
     setTranscriptionWordTimestamps(true);
     invalidateTranscriptionEnvironment();
-    await checkTranscriptionEnvironment(recommended);
   }
 
-  async function prepareTranscriptionEnvironment(selection?: { runtime: boolean; model: boolean; diarization: boolean; confirmed?: boolean }) {
+  async function prepareTranscriptionEnvironment(selection?: { runtime: boolean; model: boolean; mediaTools: boolean; diarization: boolean; confirmed?: boolean }) {
     const selectedRuntime = selection?.runtime ?? transcriptionInstallRuntime;
     const selectedModel = selection?.model ?? transcriptionInstallModel;
+    const selectedMediaTools = selection?.mediaTools ?? transcriptionInstallMediaTools;
     const selectedDiarization = selection?.diarization ?? transcriptionInstallDiarization;
     const confirmed = selection?.confirmed ?? transcriptionInstallConfirmed;
     if (!confirmed) return;
@@ -1675,6 +1675,7 @@ export function SubtitleStudio() {
             components: {
               runtime: selectedRuntime,
               model: selectedModel,
+              mediaTools: selectedMediaTools,
               diarization: selectedDiarization,
             },
           },
@@ -1693,10 +1694,11 @@ export function SubtitleStudio() {
         setTranscriptionInstallEvents(Array.isArray(status.events) ? status.events : []);
         if (status.status === "completed") {
           complete = true;
-          setTranscriptionEnvironment(status.result || null);
+          applyTranscriptionEnvironmentResult(status.result);
           setTranscriptionInstallProgress(100);
           setTranscriptionInstallConfirmed(false);
         } else if (status.status === "failed") {
+          applyTranscriptionEnvironmentResult(status.result);
           throw new Error(status.error || "听写环境准备失败");
         }
       }
@@ -1710,11 +1712,12 @@ export function SubtitleStudio() {
   async function prepareDiarizationEnvironment() {
     setTranscriptionInstallRuntime(false);
     setTranscriptionInstallModel(false);
+    setTranscriptionInstallMediaTools(false);
     setTranscriptionInstallDiarization(true);
     setTranscriptionInstallConfirmed(false);
     setTranscriptionInstallOpen(true);
     window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
-    await prepareTranscriptionEnvironment({ runtime: false, model: false, diarization: true, confirmed: true });
+    await prepareTranscriptionEnvironment({ runtime: false, model: false, mediaTools: false, diarization: true, confirmed: true });
   }
 
   async function continueWithoutDiarization() {
@@ -1787,10 +1790,12 @@ export function SubtitleStudio() {
             setTranscriptionDiarization(Boolean(applied.diarization));
             if (applied.diarizationEngine === "pyannote" || applied.diarizationEngine === "sherpa_onnx") setTranscriptionDiarizationEngine(applied.diarizationEngine);
           }
-          setTranscriptionEnvironment(status.result || null);
+          applyTranscriptionEnvironmentResult(status.result);
           setTranscriptionInstallProgress(100);
           setTranscriptionDiagnosis(status.result?.modelPlan?.explanation || "第一步模型已完成最小环境配置并通过程序校验");
         } else if (status.status === "failed") {
+          applyTranscriptionEnvironmentResult(status.result);
+          if (status.modelPlan?.explanation) setTranscriptionDiagnosis(`${status.modelPlan.explanation}；执行过程中发现新的环境问题，页面已刷新为当前真实状态，可再次让模型按新诊断继续修复。`);
           throw new Error(status.error || "模型自动配置失败");
         }
       }
@@ -3101,17 +3106,16 @@ export function SubtitleStudio() {
                   <span className={videoReady ? "step-status verified" : "step-status pending"}><i />{videoReady ? "基本设置完成" : "可直接设置"}</span>
                 </div>
                 <fieldset className="step-fields">
-                <section className={`step-resolution-banner ${transcriptionRequestedReady ? "ready" : "attention"}`}>
-                  <div>
-                    <span>{transcriptionRequestedReady ? "RECOMMENDED SETUP READY" : "NO STEP LOCK"}</span>
-                    <strong>{transcriptionRequestedReady ? "推荐听写环境已就绪" : transcriptionDiarizationNeedsSetup ? "基础听写可用；说话人分离待配置" : transcriptionEnvironment ? "听写环境需要补齐" : "可以先配置视频；听写环境由这里解决"}</strong>
-                    <p>{transcriptionRequestedReady ? "继续填写视频与输出即可；真实短音频测试是可选的质量诊断，不会阻止后续步骤。" : transcriptionDiarizationNeedsSetup ? "不配置也能继续任务；需要区分说话人时，可在下方下载本地分离引擎。" : "不会把你挡在第一步。可采用 Faster-Whisper turbo、日语、词级时间戳的默认参数检查本机；如需下载，仍会先展示体积和保存位置供你确认。"}</p>
-                  </div>
-                  {!transcriptionEnvironment?.ready && <div className="step-resolution-actions">
-                    <button type="button" className="primary" onClick={() => void applyRecommendedTranscriptionSetup()} disabled={transcriptionCheckBusy || transcriptionInstallBusy}>{transcriptionCheckBusy ? "正在检查默认配置…" : "采用推荐参数并检查"}</button>
-                    {transcriptionEnvironment && <button type="button" onClick={() => { setTranscriptionInstallOpen(true); window.setTimeout(() => document.querySelector(".transcription-download-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); }}>查看缺项与处理方式</button>}
-                  </div>}
+                <section className="source-setup-guide" aria-label="视频与听写配置顺序">
+                  <header><div><span>SETUP ORDER</span><strong>按顺序完成这 3 项</strong></div><small>每一步都在下方对应区域完成</small></header>
+                  <ol>
+                    <li className={videoReady ? "complete" : "current"}><i>1</i><span><strong>素材与输出</strong><small>填写视频位置、输出文件夹和格式</small></span><em>{videoReady ? "已完成" : "从这里开始"}</em></li>
+                    <li className="configured"><i>2</i><span><strong>听写方案</strong><small>{transcriptionPreset.label} · {transcriptionModel} · {transcriptionLanguage === "ja" ? "日语" : transcriptionLanguage}</small></span><button type="button" onClick={applyRecommendedTranscriptionSetup} disabled={transcriptionInstallBusy}>使用推荐方案</button></li>
+                    <li className={transcriptionRequestedReady ? "complete" : transcriptionEnvironment ? "attention" : "pending"}><i>3</i><span><strong>项目环境</strong><small>{transcriptionRequestedReady ? "运行库、模型和媒体工具已就绪" : transcriptionEnvironment ? `发现 ${transcriptionEnvironmentIssueCount} 个待处理项` : "检查后由本地环境 Agent 处理缺项"}</small></span><em>{transcriptionRequestedReady ? "已完成" : transcriptionEnvironment ? "需要处理" : "待检查"}</em></li>
+                  </ol>
                 </section>
+                <section className="source-setup-block source-media-block">
+                <div className="source-setup-block-heading"><i>1</i><div><strong>填写素材与输出</strong><small>先确定输入和交付格式</small></div></div>
                 <label className="field-label" htmlFor="video-source">视频位置</label><div className="source-input-row">
                   <input id="video-source" value={source} onChange={(event) => { setSource(event.target.value); setResearchPreview(""); setTranscriptionTestStage("idle"); setTranscriptionTestDetail("视频已变化；可按需测试真实音频"); setTranscriptionTestResult(null); }} placeholder="粘贴 Bilibili / YouTube / 其他链接，或输入本地路径" />
                   <input ref={fileInputRef} className="visually-hidden" type="file" accept="video/*,audio/*" onChange={handleFile} />
@@ -3143,8 +3147,9 @@ export function SubtitleStudio() {
                     ))}
                   </div>
                 </div>
+                </section>
                 <div className="transcription-config">
-                  <div className="transcription-heading"><div><span>TRANSCRIPTION</span><h3>原文听写引擎</h3><p>听写和翻译是两套模型。这里决定谁来听音频、时间戳做到多细，以及是否区分说话人。</p></div><strong>{transcriptionPreset.location} · {transcriptionQualityPreset.label}</strong></div>
+                  <div className="transcription-heading"><div><i>2</i><span>TRANSCRIPTION</span><h3>选择原文听写方案</h3><p>听写和翻译是两套模型。这里决定谁来听音频、时间戳做到多细，以及是否区分说话人。</p></div><strong>{transcriptionPreset.location} · {transcriptionQualityPreset.label}</strong></div>
                   <div className="transcription-mode-tabs" role="group" aria-label="听写运行位置">
                     <button className={transcriptionMode === "local" ? "active" : ""} onClick={() => chooseTranscriptionProvider("faster_whisper")}>本地模型</button>
                     <button className={transcriptionMode === "api" ? "active" : ""} onClick={() => chooseTranscriptionProvider("openai_audio")}>在线 API</button>
@@ -3165,11 +3170,11 @@ export function SubtitleStudio() {
                   {transcriptionMode === "api" && !transcriptionApiKey.trim() && <p className="transcription-warning">开始前需要填写听写 API Key；不会自动复用翻译模型的密钥，避免误传。</p>}
                   <section className="transcription-environment">
                     <div className="transcription-environment-heading">
-                      <div><span>ENVIRONMENT CHECK</span><strong>检查依赖，再决定是否下载</strong><small>检查只读取本机状态，不会联网、不安装。下载需另行勾选并确认。</small></div>
-                      <button className="secondary-button" onClick={() => void checkTranscriptionEnvironment()} disabled={transcriptionCheckBusy || transcriptionInstallBusy}>{transcriptionCheckBusy ? "检查中…" : transcriptionEnvironment ? "重新检查" : "检查当前环境"}</button>
+                      <i>3</i><div><span>PROJECT ENVIRONMENT</span><strong>检查并配置项目环境</strong><small>先只读检查；确认下载后，本地环境 Agent 才会在项目目录中修复。</small></div>
+                      <button className={`environment-check-button ${transcriptionEnvironment ? "checked" : "primary"}`} onClick={() => void checkTranscriptionEnvironment()} disabled={transcriptionCheckBusy || transcriptionInstallBusy}>{transcriptionCheckBusy ? "正在检查项目环境…" : transcriptionEnvironment ? "✓ 重新检查" : "检查项目环境 →"}</button>
                     </div>
-                    <details className="transcription-environment-details">
-                      <summary><span>{transcriptionCheckError ? "检查失败 · 展开查看" : transcriptionEnvironment ? transcriptionEnvironment.ready ? "环境已就绪 · 查看详情" : "发现缺失项 · 展开处理" : "环境位置、依赖与下载选项"}</span><small>按需展开</small></summary>
+                    <details className={`transcription-environment-details ${transcriptionCheckError ? "error" : transcriptionEnvironment ? transcriptionRequestedReady ? "ready" : "attention" : "idle"}`}>
+                      <summary><i>{transcriptionCheckError || transcriptionEnvironment && !transcriptionRequestedReady ? "!" : transcriptionRequestedReady ? "✓" : "3"}</i><span><strong>{transcriptionCheckError ? "环境检查失败" : transcriptionEnvironment ? transcriptionRequestedReady ? "项目环境已经就绪" : `发现 ${transcriptionEnvironmentIssueCount} 个环境缺失项` : "尚未检查项目环境"}</strong><small>{transcriptionCheckError ? "展开查看错误并重试" : transcriptionEnvironment ? transcriptionRequestedReady ? "展开查看运行目录和版本" : `展开后让 ${engineVerified ? activeEngineLabel : "第一页 AI"} 在项目目录中处理` : "点击上方蓝色按钮开始只读检查"}</small></span><em>{transcriptionEnvironment && !transcriptionRequestedReady ? "立即处理 →" : "查看详情"}</em></summary>
                     {transcriptionMode === "local" && <div className="transcription-environment-location">
                       <div><span>PROJECT DATA</span><strong>模型与项目数据文件夹</strong><small>用户只需选择容量充足的位置；程序会自动判断 Python 运行库能否安全放在同一磁盘。</small></div>
                       <div className="transcription-environment-path-row"><input aria-label="听写模型与项目数据文件夹" value={transcriptionEnvironmentRoot} onChange={(event) => updateTranscriptionEnvironmentRoot(event.target.value)} placeholder="选择模型与项目数据文件夹" /><button type="button" onClick={chooseTranscriptionEnvironmentRoot}>选择文件夹</button><button type="button" className={transcriptionEnvironmentSaved ? "saved" : ""} onClick={saveTranscriptionEnvironmentRoot} disabled={!transcriptionEnvironmentRoot.trim()}>{transcriptionEnvironmentSaved ? "✓ 已记住" : "记住位置"}</button></div>
@@ -3177,6 +3182,21 @@ export function SubtitleStudio() {
                     </div>}
                     {!transcriptionEnvironment && !transcriptionCheckError && <div className="transcription-empty-check"><i />尚未检查。先选择听写服务、质量和模型，再检查这台电脑是否已经具备所需内容。</div>}
                     {transcriptionEnvironment && <>
+                      {transcriptionEnvironment.diagnostics && !transcriptionEnvironment.diagnostics.healthy && <section className={`environment-agent-console ${transcriptionInstallBusy ? "running" : "idle"}`} aria-live="polite">
+                        <header><div><span><i /> LOCAL ENV AGENT</span><strong>由第一页 AI 配置项目环境</strong></div><em>{engineVerified ? `${activeEngineLabel} · 已连接` : "等待第一页模型通过测试"}</em></header>
+                        <div className="environment-agent-scope"><span>工作目录</span><code title={transcriptionEnvironment.environmentRoot}>{transcriptionEnvironment.environmentRoot}</code><b>仅项目目录</b></div>
+                        <div className="environment-agent-terminal">
+                          <p className="command"><b>$</b> gaku-env-agent inspect --harness transcription-environment-v1</p>
+                          {transcriptionInstallEvents.length > 0
+                            ? transcriptionInstallEvents.slice(-8).map((event, index) => <p className={event.kind} key={`${event.at}-${index}`}><i>{event.kind === "done" ? "✓" : event.kind === "error" ? "×" : "›"}</i><span>{event.text}</span></p>)
+                            : transcriptionEnvironment.diagnostics.issues.filter((issue) => issue.id !== "last-install").map((issue) => <p className="pending" key={issue.id}><i>›</i><span><strong>{issue.label}</strong><small>{issue.repair}</small></span></p>)}
+                          <p className="guard"><i>✓</i><span>Harness 已加载：模型只选择固定修复项，程序负责下载、校验、原子替换与最终复检</span></p>
+                        </div>
+                        <footer><div><strong>{transcriptionInstallBusy ? transcriptionInstallStage || "环境 Agent 正在工作" : `准备处理 ${transcriptionEnvironmentIssueCount} 个缺失项`}</strong><small>启动前仍会确认下载体积和目录；不执行模型生成的 Shell，不修改系统 Python。</small></div><div><button type="button" className="primary" onClick={() => void autoPrepareTranscriptionWithSelectedEngine()} disabled={!engineVerified || transcriptionInstallBusy || !transcriptionEnvironmentRoot.trim()}>{transcriptionInstallBusy ? `${Math.round(transcriptionInstallProgress)}% · 正在配置` : engineVerified ? "启动本地环境 Agent" : "先完成第一页模型测试"}</button><button type="button" onClick={askModelToDiagnoseTranscription} disabled={!engineVerified || transcriptionDiagnosisBusy}>{transcriptionDiagnosisBusy ? "分析中…" : "只分析原因"}</button></div></footer>
+                        {transcriptionDiagnosis && <div className="environment-agent-advice"><span>AI PLAN</span><p>{transcriptionDiagnosis}</p></div>}
+                        <details className="environment-technical-diagnostics"><summary>查看技术诊断与原始错误</summary><div>{transcriptionEnvironment.diagnostics.issues.map((issue) => <article key={issue.id}><strong>{issue.label}</strong><pre>{issue.detail}</pre><small>{issue.repair}</small></article>)}</div></details>
+                      </section>}
+                      <details className="environment-runtime-details"><summary>查看依赖清单、资源用量和运行目录</summary><div>
                       <div className="transcription-dependency-list">
                         {transcriptionEnvironment.components.map((component) => <div className={`transcription-dependency ${component.status}`} key={component.id}><i>{component.status === "ready" ? "✓" : component.status === "optional" ? "—" : "!"}</i><span><strong>{component.label}</strong><small>{component.detail}</small></span><em>{component.status === "ready" ? "已存在" : component.status === "optional" ? "未启用" : component.status === "degraded" ? "待配置" : "缺失"}</em></div>)}
                       </div>
@@ -3191,6 +3211,7 @@ export function SubtitleStudio() {
                         <div className="transcription-managed-runtime-grid">
                           <span><i className={transcriptionEnvironment.managedRuntime.uvReady ? "ready" : "pending"} /><small>工具链</small><strong>uv {transcriptionEnvironment.managedRuntime.uvVersion}</strong><em>{transcriptionEnvironment.managedRuntime.uvReady ? "已就绪" : transcriptionEnvironment.managedRuntime.supported ? "首次配置自动下载" : "兼容回退"}</em></span>
                           <span><i className={transcriptionEnvironment.managedRuntime.pythonReady ? "ready" : "pending"} /><small>Python</small><strong>{transcriptionEnvironment.managedRuntime.pythonVersion}</strong><em>{transcriptionEnvironment.managedRuntime.pythonReady ? "独立环境已就绪" : "由程序自动准备"}</em></span>
+                          <span><i className={transcriptionEnvironment.managedRuntime.nativeToolsReady ? "ready" : "pending"} /><small>媒体工具</small><strong>FFmpeg / FFprobe</strong><em>{transcriptionEnvironment.managedRuntime.nativeToolsReady ? "项目运行时已就绪" : `固定版本 ${transcriptionEnvironment.managedRuntime.nativeToolsVersion || "待准备"}`}</em></span>
                           <span><i className="ready" /><small>环境隔离</small><strong>ASR / 说话人分离独立</strong><em>失败不覆盖可用环境</em></span>
                         </div>
                         <p>{transcriptionEnvironment.managedRuntime.isolation}。版本指纹：ASR {transcriptionEnvironment.managedRuntime.baseEnvironmentKey} · 分离引擎 {transcriptionEnvironment.managedRuntime.diarizationEnvironmentKey}</p>
@@ -3204,29 +3225,25 @@ export function SubtitleStudio() {
                           <button type="button" onClick={() => void continueWithoutDiarization()} disabled={transcriptionInstallBusy}>暂不使用说话人分离</button>
                         </div>
                       </section>}
-                      {transcriptionEnvironment.diagnostics && !transcriptionEnvironment.diagnostics.healthy && <section className="transcription-diagnostics">
-                        <div className="transcription-diagnostics-heading"><div><span>FAILURE ANALYSIS</span><strong>本次配置为什么没有完成</strong><small>{transcriptionEnvironment.diagnostics.summary}</small></div><div className="transcription-diagnostics-actions"><button type="button" className="primary" onClick={() => void autoPrepareTranscriptionWithSelectedEngine()} disabled={!engineVerified || transcriptionInstallBusy || !transcriptionEnvironmentRoot.trim()}>{transcriptionInstallBusy ? transcriptionInstallStage || "正在配置…" : engineVerified ? "让第一步模型自动配置" : "先通过模型测试"}</button><button type="button" onClick={askModelToDiagnoseTranscription} disabled={!engineVerified || transcriptionDiagnosisBusy}>{transcriptionDiagnosisBusy ? "模型正在分析…" : "只分析原因"}</button></div></div>
-                        <div className="transcription-diagnostic-issues">{transcriptionEnvironment.diagnostics.issues.map((issue) => <article key={issue.id}><i>!</i><div><strong>{issue.label}</strong><p>{issue.detail}</p><small>{issue.repair}</small></div></article>)}</div>
-                        <p className="transcription-ai-safety">模型只读取脱敏检查结果并解释原因，不会生成或执行安装命令；修复仍由固定的安全安装流程完成。</p>
-                        {transcriptionDiagnosis && <div className="transcription-ai-advice"><span>MODEL ADVICE</span><p>{transcriptionDiagnosis}</p></div>}
-                      </section>}
                       <div className="transcription-cache-path"><span>基础运行环境</span><code>{transcriptionEnvironment.runtimePath}</code></div>
                       <div className="transcription-cache-path"><span>说话人分离环境</span><code>{transcriptionEnvironment.diarizationRuntimePath || "启用后自动创建"}</code></div>
                       <div className="transcription-cache-path"><span>模型缓存</span><code>{transcriptionEnvironment.cachePath}</code></div>
+                      </div></details>
                       {transcriptionMode === "local" && transcriptionProvider === "faster_whisper" && transcriptionNeedsEnvironmentSetup && <div className="transcription-download-panel">
-                        <button className={`transcription-download-toggle ${transcriptionInstallOpen ? "open" : "attention"}`} aria-expanded={transcriptionInstallOpen} onClick={() => { setTranscriptionInstallOpen((value) => !value); setTranscriptionInstallConfirmed(false); }}>
-                          <i aria-hidden="true">{transcriptionInstallOpen ? "✓" : "↓"}</i>
-                          <span><strong>{transcriptionInstallOpen ? "收起配置选项" : transcriptionDiarizationNeedsSetup ? "配置说话人分离" : "立即配置缺失环境"}</strong><small>{transcriptionInstallOpen ? "配置内容已展开，可在下方确认" : transcriptionDiarizationNeedsSetup ? "基础听写不会重复安装；只补齐当前增强能力" : "补齐基础运行库，已下载的模型不会重复下载"}</small></span>
+                        <button className={`transcription-download-toggle ${transcriptionInstallOpen ? "open" : "manual"}`} aria-expanded={transcriptionInstallOpen} onClick={() => { setTranscriptionInstallOpen((value) => !value); setTranscriptionInstallConfirmed(false); }}>
+                          <i aria-hidden="true">{transcriptionInstallOpen ? "✓" : "⚙"}</i>
+                          <span><strong>{transcriptionInstallOpen ? "收起手动配置" : transcriptionDiarizationNeedsSetup ? "手动配置说话人分离" : "手动选择配置项"}</strong><small>{transcriptionInstallOpen ? "配置内容已展开，可在下方确认" : "本地环境 Agent 是推荐方式；熟悉依赖时也可以手动选择固定白名单项"}</small></span>
                           <em aria-hidden="true">{transcriptionInstallOpen ? "⌃" : "→"}</em>
                         </button>
                         {transcriptionInstallOpen && <div className="transcription-install-options">
-                          <p>模型与项目数据保存到 <code>{transcriptionEnvironment.environmentRoot}</code>；Python 运行库由程序按文件系统自动放置，不修改系统 Python。当前安装方式：{transcriptionEnvironment.installer || "自动选择"}。</p>
+                          <p>模型与项目数据保存到 <code>{transcriptionEnvironment.environmentRoot}</code>；Python 与 FFmpeg/FFprobe 由程序按文件系统放入项目运行目录，不修改系统环境。当前安装方式：{transcriptionEnvironment.installer || "自动选择"}。</p>
                           {(transcriptionInstallBusy || transcriptionInstallProgress > 0) && <div className={`transcription-install-progress ${transcriptionInstallProgress >= 100 ? "complete" : ""}`} aria-live="polite"><div><strong>{transcriptionInstallStage || "等待开始"}</strong><span>{Math.round(transcriptionInstallProgress)}%</span></div><progress max="100" value={transcriptionInstallProgress} /><ol><li className={transcriptionInstallProgress >= 6 ? "done" : "active"}>工具链</li><li className={transcriptionInstallProgress >= 10 ? "done" : ""}>独立 Python</li><li className={transcriptionInstallProgress >= 28 ? "done" : ""}>运行库</li><li className={transcriptionInstallProgress >= 55 ? "done" : ""}>模型</li><li className={transcriptionInstallProgress >= 92 ? "done" : ""}>验证</li></ol></div>}
                           <label aria-label="安装基础听写运行库" htmlFor="install-transcription-runtime"><input id="install-transcription-runtime" type="checkbox" checked={transcriptionInstallRuntime} disabled={transcriptionRuntimeReady || (transcriptionInstallModel && !transcriptionRuntimeReady)} onChange={(event) => { setTranscriptionInstallRuntime(event.target.checked); setTranscriptionInstallConfirmed(false); }} /><span><strong>基础听写运行库{transcriptionRuntimeReady ? " · 已就绪" : ""}</strong><small>{transcriptionRuntimeReady ? "已通过完整导入验证，不会重复安装" : "Faster-Whisper 与 CTranslate2，约 250 MB；缺失时是下载模型的必要项。若本机缺少 Python 3.11，首次还会准备约 80 MB 的独立运行环境"}</small></span></label>
                           <label aria-label={`下载 ${transcriptionModel} 模型`} htmlFor="install-transcription-model"><input id="install-transcription-model" type="checkbox" checked={transcriptionInstallModel} disabled={transcriptionModelReady} onChange={(event) => { const checked = event.target.checked; setTranscriptionInstallModel(checked); if (checked && !transcriptionRuntimeReady) setTranscriptionInstallRuntime(true); setTranscriptionInstallConfirmed(false); }} /><span><strong>下载 {transcriptionModel} 模型{transcriptionModelReady ? " · 已缓存" : ""}</strong><small>{transcriptionModelReady ? "模型快照已通过完整性检查，不会重复下载" : `约 ${transcriptionEnvironment.resources.downloadLabel}，保存到上方缓存位置`}</small></span></label>
+                          <label aria-label="安装项目媒体工具链" htmlFor="install-transcription-media-tools"><input id="install-transcription-media-tools" type="checkbox" checked={transcriptionInstallMediaTools} disabled={transcriptionMediaToolsReady || transcriptionEnvironment.installationCapabilities?.mediaTools === false} onChange={(event) => { setTranscriptionInstallMediaTools(event.target.checked); setTranscriptionInstallConfirmed(false); }} /><span><strong>FFmpeg / FFprobe 项目工具链{transcriptionMediaToolsReady ? " · 已就绪" : ""}</strong><small>{transcriptionMediaToolsReady ? "项目运行目录中的两个工具均已通过检查，不依赖系统安装" : transcriptionEnvironment.installationCapabilities?.mediaTools === false ? "当前平台暂未提供项目托管资产" : `${transcriptionEnvironment.resources.nativeToolsDownloadLabel || "约 64 MB"}；下载后进行 SHA256 和启动校验，只写入上方项目运行目录`}</small></span></label>
                           <label aria-label="安装本地说话人分离" htmlFor="install-transcription-diarization"><input id="install-transcription-diarization" type="checkbox" checked={transcriptionInstallDiarization} disabled={transcriptionDiarizationReady || transcriptionEnvironment.installationCapabilities?.diarization === false} onChange={(event) => { setTranscriptionInstallDiarization(event.target.checked); setTranscriptionInstallConfirmed(false); }} /><span><strong>{transcriptionDiarizationEngine === "sherpa_onnx" ? "Sherpa-ONNX 本地说话人分离（推荐）" : "WhisperX / pyannote（高级）"}{transcriptionDiarizationReady ? " · 已就绪" : ""}</strong><small>{transcriptionDiarizationReady ? "运行库与模型均已通过检查，不会重复安装" : transcriptionEnvironment.installationCapabilities?.diarization === false ? `当前平台没有托管工具链，且 ${transcriptionEnvironment.installationCapabilities.systemPython} 不满足 Python 3.10–3.13` : transcriptionDiarizationEngine === "sherpa_onnx" ? `安装独立 CPU 运行库并下载 ${transcriptionEnvironment.resources.diarizationDownloadLabel || "约 47 MB"} 校验模型；无需账号或 Hugging Face Token` : "使用独立临时环境安装并深度验证；需要 Hugging Face gated 模型权限"}</small></span></label>
-                          <label aria-label="确认听写环境下载" className="transcription-install-confirm" htmlFor="confirm-transcription-install"><input id="confirm-transcription-install" type="checkbox" checked={transcriptionInstallConfirmed} onChange={(event) => setTranscriptionInstallConfirmed(event.target.checked)} /><span><strong>我已确认下载内容、体积和保存位置</strong><small>只有勾选后才允许联网安装或下载；使用应用自己的运行目录，不修改系统 Python</small></span></label>
-                          <button className="primary-install-button" disabled={!transcriptionEnvironment.installable || !transcriptionInstallSelectionSupported || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || !transcriptionHasInstallSelection} onClick={() => void prepareTranscriptionEnvironment()}>{transcriptionInstallBusy ? transcriptionInstallStage || "正在准备…" : "安全配置本地环境"}</button>
+                          <label aria-label="确认听写环境下载" className="transcription-install-confirm" htmlFor="confirm-transcription-install"><input id="confirm-transcription-install" type="checkbox" checked={transcriptionInstallConfirmed} onChange={(event) => setTranscriptionInstallConfirmed(event.target.checked)} /><span><strong>我已确认下载内容、体积和保存位置</strong><small>只有勾选后才允许联网安装或下载；Python 与媒体工具均使用应用自己的运行目录，不修改系统环境</small></span></label>
+                          <button className="primary-install-button" disabled={!transcriptionEnvironment.installable || !transcriptionInstallSelectionSupported || !transcriptionEnvironmentRoot.trim() || !transcriptionInstallConfirmed || transcriptionInstallBusy || !transcriptionHasInstallSelection} onClick={() => void prepareTranscriptionEnvironment()}>{transcriptionInstallBusy ? transcriptionInstallStage || "正在准备…" : "按所选项配置项目环境"}</button>
                           {transcriptionInstallEvents.length > 0 && <div className="transcription-install-log">{transcriptionInstallEvents.map((event, index) => <div className={event.kind} key={`${event.at}-${index}`}><i />{event.text}</div>)}</div>}
                         </div>}
                       </div>}

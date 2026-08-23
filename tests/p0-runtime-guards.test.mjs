@@ -68,11 +68,13 @@ test("adaptive API batches shrink only the child that reaches the output limit",
 });
 
 test("job launch source contains real preflight, immediate diarization downgrade, and manifest helper enforcement", async () => {
-  const [server, skill, launcher, resourceManager] = await Promise.all([
+  const [server, skill, environmentHarness, launcher, resourceManager, studio] = await Promise.all([
     readFile(new URL("../local-agent-bridge/server.mjs", import.meta.url), "utf8"),
     readFile(new URL("../harness/precision-video-subtitles/SKILL.md", import.meta.url), "utf8"),
+    readFile(new URL("../harness/precision-video-subtitles/references/transcription-environment-agent.md", import.meta.url), "utf8"),
     readFile(new URL("../local-agent-bridge/launch.mjs", import.meta.url), "utf8"),
     readFile(new URL("../local-agent-bridge/job-resource-manager.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../app/SubtitleStudio.tsx", import.meta.url), "utf8"),
   ]);
   for (const phrase of [
     "runTaskTranscriptionPreflight",
@@ -88,6 +90,13 @@ test("job launch source contains real preflight, immediate diarization downgrade
     "assertJobCapacity",
     "startJobMonitor",
     "server_shutdown",
+    "baseTranscriptionModules",
+    "ensureManagedNativeTools",
+    "mediaTools: Boolean(repairs.mediaTools || plan.mediaTools)",
+    "PSS_FFMPEG_PATH",
+    "applyProxyEnv({}, input.proxyUrl)",
+    "operation.result = await transcriptionEnvironment(input)",
+    "transcriptionEnvironmentHarness",
   ]) assert.ok(server.includes(phrase), `server missing P0 guard: ${phrase}`);
   for (const phrase of [
     "manifest.transcription_preflight",
@@ -96,10 +105,16 @@ test("job launch source contains real preflight, immediate diarization downgrade
     "Do not create Agent sub-tasks",
     "resource-guard stop",
   ]) assert.ok(skill.includes(phrase), `harness missing P0 guard: ${phrase}`);
+  for (const phrase of ["smallest valid plan from the declared allowlist", "Do not write shell commands", '"mediaTools":true']) {
+    assert.ok(environmentHarness.includes(phrase), `environment harness missing guard: ${phrase}`);
+  }
   for (const phrase of ["mkdtempSync", ".precision-subtitle-studio", "inheritedEnvironment.TMPDIR"]) {
     assert.ok(launcher.includes(phrase), `launcher missing writable temp fallback: ${phrase}`);
   }
   for (const phrase of ["maxConcurrentJobs", "idleTimeoutMs", "RotatingLogWriter", "processTreeSnapshot"]) {
     assert.ok(resourceManager.includes(phrase), `resource manager missing guard: ${phrase}`);
+  }
+  for (const phrase of ["applyTranscriptionEnvironmentResult(status.result)", "页面已刷新为当前真实状态", "FFmpeg / FFprobe 项目工具链", "setTranscriptionInstallMediaTools(Boolean(repair.mediaTools))"]) {
+    assert.ok(studio.includes(phrase), `studio missing environment recovery guard: ${phrase}`);
   }
 });

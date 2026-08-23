@@ -13,12 +13,14 @@ import { ProxyAgent } from "undici";
 import { ambiguityReviewModeFromConfig, ambiguityReviewPolicyPrompt, workflowPhaseStatus } from "./ambiguity-policy.mjs";
 import { createRotatingLogStream, jobResourcePolicy, processTreeSnapshot } from "./job-resource-manager.mjs";
 import { updateJsonAtomic, writeJsonAtomic } from "./manifest-store.mjs";
-import { ensureManagedUv, findExecutable, managedInstallCapabilities, managedUvPath, managedUvxPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "./runtime-manager.mjs";
+import { ensureManagedNativeTools, ensureManagedUv, findExecutable, managedInstallCapabilities, managedNativeToolPath, managedUvPath, managedUvxPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "./runtime-manager.mjs";
 
 const bridgeDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(bridgeDirectory, "..");
 const staticRoot = path.join(projectRoot, "standalone");
 const harnessPath = path.join(projectRoot, "harness", "precision-video-subtitles", "SKILL.md");
+const transcriptionEnvironmentHarnessPath = path.join(projectRoot, "harness", "precision-video-subtitles", "references", "transcription-environment-agent.md");
+const transcriptionEnvironmentHarness = readFileSync(transcriptionEnvironmentHarnessPath, "utf8").trim();
 const apiHelperPath = path.join(bridgeDirectory, "api-model-call.mjs");
 const builtinHarnessRunnerPath = path.join(bridgeDirectory, "builtin-harness-runner.mjs");
 const manifestHelperPath = path.join(bridgeDirectory, "manifest-update.mjs");
@@ -386,10 +388,27 @@ function executable(name) {
         path.join(projectRoot, ".tools", "uv", name),
         path.join(os.homedir(), ".local", "bin", name),
         ].filter(Boolean)
-        : [
-          path.join(packagedToolchainRoot, currentRuntimePlatform, process.platform === "win32" ? `${name}.exe` : name),
-        ];
+        : name === "ffmpeg" || name === "ffprobe"
+          ? [
+            process.env[name === "ffmpeg" ? "PSS_FFMPEG_PATH" : "PSS_FFPROBE_PATH"],
+            managedNativeToolPath(path.join(defaultAsrRoot, "runtimes"), runtimeManifest, name),
+            managedNativeToolPath(localRuntimeRoot, runtimeManifest, name),
+            path.join(packagedToolchainRoot, currentRuntimePlatform, process.platform === "win32" ? `${name}.exe` : name),
+          ].filter(Boolean)
+          : [
+            path.join(packagedToolchainRoot, currentRuntimePlatform, process.platform === "win32" ? `${name}.exe` : name),
+          ];
   return findExecutable(name, { extraCandidates: specialCandidates });
+}
+
+function transcriptionExecutable(input, name) {
+  const paths = transcriptionPaths(input);
+  const managed = managedNativeToolPath(paths.runtimeRoot, runtimeManifest, name);
+  const packaged = path.join(packagedToolchainRoot, currentRuntimePlatform, process.platform === "win32" ? `${name}.exe` : name);
+  const projectOwned = findExecutable(name, { env: { ...process.env, PATH: "" }, extraCandidates: [managed, packaged] });
+  if (projectOwned) return projectOwned;
+  const localFasterWhisper = String(input?.mode || "local") === "local" && String(input?.provider || "faster_whisper") === "faster_whisper";
+  return localFasterWhisper ? null : executable(name);
 }
 
 async function settleOutputStreams(...streams) {
@@ -499,6 +518,7 @@ const transcriptionModelProfiles = {
   "large-v3": { downloadBytes: 3_200_000_000, memoryBytes: 6_000_000_000, label: "Large v3（最高精度）" },
   turbo: { downloadBytes: 1_700_000_000, memoryBytes: 4_000_000_000, label: "Turbo（速度与精度平衡）" },
 };
+const baseTranscriptionModules = ["faster_whisper", "ctranslate2", "tokenizers", "huggingface_hub", "socksio"];
 
 const fasterWhisperRepositories = {
   tiny: "models--Systran--faster-whisper-tiny",
@@ -733,6 +753,10 @@ async function transcriptionEnvironment(input = {}) {
     ? Object.values(selectedDiarizationManifest.models || {}).reduce((total, asset) => total + Number(asset?.bytes || 0), 0)
     : 0;
   const paths = transcriptionPaths(input);
+  const nativeToolAssets = runtimeManifest.nativeTools?.assets?.[currentRuntimePlatform] || null;
+  const nativeToolsDownloadBytes = nativeToolAssets
+    ? Number(nativeToolAssets.ffmpeg?.bytes || 0) + Number(nativeToolAssets.ffprobe?.bytes || 0)
+    : 0;
   const profile = transcriptionModelProfiles[model] || { downloadBytes: 0, memoryBytes: 0, label: model };
   const fsInfo = await statfs(existingAncestor(paths.root)).catch(() => null);
   const freeDiskBytes = fsInfo ? Number(fsInfo.bavail) * Number(fsInfo.bsize) : 0;
@@ -798,11 +822,11 @@ async function transcriptionEnvironment(input = {}) {
   }
 
   let python = "";
-  let modules = { faster_whisper: false, ctranslate2: false };
+  let modules = Object.fromEntries(baseTranscriptionModules.map((name) => [name, false]));
   let importErrors = {};
   for (const candidate of asrPythonCandidates(paths)) {
-    const result = await pythonModuleState(candidate, ["faster_whisper", "ctranslate2"]);
-    if (result.faster_whisper && result.ctranslate2) {
+    const result = await pythonModuleState(candidate, baseTranscriptionModules);
+    if (baseTranscriptionModules.every((name) => result[name])) {
       python = candidate;
       modules = result;
       importErrors = result._errors || {};
@@ -812,7 +836,14 @@ async function transcriptionEnvironment(input = {}) {
   }
   const repository = fasterWhisperRepositories[model];
   const modelReady = await fasterWhisperModelReady(paths.modelRoot, repository, model);
-  const runtimeReady = Boolean(modules.faster_whisper && modules.ctranslate2);
+  const runtimeImportsReady = baseTranscriptionModules.every((name) => modules[name]);
+  const expectedBaseEnvironmentKey = runtimeEnvironmentKey(runtimeManifest.environments["asr-base"].packages);
+  const installedBaseEnvironment = await readJsonFile(path.join(paths.baseRuntimePath, "precision-runtime.json"), null);
+  const runtimeManifestReady = Boolean(installedBaseEnvironment?.key === expectedBaseEnvironmentKey);
+  const runtimeReady = Boolean(runtimeImportsReady && runtimeManifestReady);
+  const ffmpeg = transcriptionExecutable(input, "ffmpeg");
+  const ffprobe = transcriptionExecutable(input, "ffprobe");
+  const mediaToolsReady = Boolean(ffmpeg && ffprobe);
   const diarizationPython = venvPython(paths.diarizationRuntimePath);
   const diarizationModuleNames = selectedDiarizationEngine === "pyannote"
     ? ["whisperx.asr", "whisperx.diarize", "transformers", "pandas", "torch", "sympy"]
@@ -824,7 +855,10 @@ async function transcriptionEnvironment(input = {}) {
   const diarizationModelsReady = wantsDiarization && (selectedDiarizationEngine === "pyannote" || await sherpaDiarizationModelsReady(paths));
   const hfTokenReady = Boolean(String(input.hfToken || "").trim() || process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN);
   const diarizationReady = Boolean(diarizationImportReady && diarizationModelsReady && (selectedDiarizationEngine !== "pyannote" || hfTokenReady));
-  const baseReady = runtimeReady && modelReady;
+  const baseReady = runtimeReady && modelReady && mediaToolsReady;
+  const pendingDownloadBytes = (modelReady ? 0 : profile.downloadBytes)
+    + (mediaToolsReady ? 0 : nativeToolsDownloadBytes)
+    + (wantsDiarization && !diarizationReady ? diarizationDownloadBytes : 0);
   const uv = executable("uv");
   const managedUv = managedUvPath(localRuntimeRoot, runtimeManifest);
   const toolchainSupported = Boolean(runtimeManifest.uv.assets[currentRuntimePlatform]);
@@ -842,13 +876,25 @@ async function transcriptionEnvironment(input = {}) {
   const diarizationInstallable = installCapabilities.diarization;
   const previousInstall = await readJsonFile(path.join(paths.root, "install-state.json"));
   const issues = [];
-  if (!runtimeReady) issues.push({
+  if (!runtimeImportsReady) issues.push({
     id: "runtime-import",
     label: "基础听写库无法完整导入",
     detail: Object.values(importErrors).filter(Boolean).join("；") || "运行库不完整或依赖缺失",
-    repair: "重新配置基础听写运行库；程序会补齐 tokenizers 等依赖，不必重复下载完整模型。",
+    repair: "重新配置基础听写运行库；程序会补齐模型下载所需的代理支持等依赖，不必重复下载完整模型。",
+  });
+  if (runtimeImportsReady && !runtimeManifestReady) issues.push({
+    id: "runtime-version",
+    label: "基础听写环境需要升级",
+    detail: "现有环境可以导入，但与当前应用的固定依赖清单不一致",
+    repair: "重新配置基础听写运行库；程序只更新隔离环境，已有模型缓存会继续复用。",
   });
   if (!modelReady) issues.push({ id: "model-cache", label: "模型缓存不完整", detail: `未发现 ${profile.label} 的完整快照`, repair: "继续下载模型；已存在文件会被复用。" });
+  if (!mediaToolsReady) issues.push({
+    id: "media-tools",
+    label: "媒体工具链尚未准备",
+    detail: `缺少 ${[!ffmpeg ? "FFmpeg" : "", !ffprobe ? "FFprobe" : ""].filter(Boolean).join(" / ")}`,
+    repair: nativeToolAssets ? "通过项目环境配置下载并校验固定版本的 FFmpeg/FFprobe；不会修改系统目录。" : `当前平台 ${currentRuntimePlatform} 暂无项目托管资产，请使用便携包内工具链或切换到受支持平台。`,
+  });
   if (wantsDiarization && !diarizationImportReady) issues.push({
     id: "diarization-import",
     label: "说话人分离环境未通过深度检查",
@@ -873,10 +919,13 @@ async function transcriptionEnvironment(input = {}) {
     ...common,
     resources: {
       ...common.resources,
-      pendingDownloadBytes: (modelReady ? 0 : profile.downloadBytes) + (wantsDiarization && !diarizationReady ? diarizationDownloadBytes : 0),
-      pendingDownloadLabel: formatStorage((modelReady ? 0 : profile.downloadBytes) + (wantsDiarization && !diarizationReady ? diarizationDownloadBytes : 0)),
+      pendingDownloadBytes,
+      pendingDownloadLabel: formatStorage(pendingDownloadBytes),
+      diskSufficient: !pendingDownloadBytes || freeDiskBytes >= pendingDownloadBytes * 2.2,
       diarizationDownloadBytes,
       diarizationDownloadLabel: diarizationDownloadBytes ? `约 ${formatStorage(diarizationDownloadBytes)}` : "按所选引擎",
+      nativeToolsDownloadBytes,
+      nativeToolsDownloadLabel: nativeToolsDownloadBytes ? `约 ${formatStorage(nativeToolsDownloadBytes)}` : "当前平台未提供",
     },
     python,
     ready: baseReady,
@@ -885,15 +934,16 @@ async function transcriptionEnvironment(input = {}) {
     degraded: Boolean(baseReady && wantsDiarization && !diarizationReady),
     baseReady,
     components: [
-      { id: "runtime", label: "基础听写运行库", status: runtimeReady ? "ready" : "missing", detail: runtimeReady ? `Faster-Whisper 与 CTranslate2 已存在 · ${python}` : "尚未安装到项目独立环境" },
+      { id: "runtime", label: "基础听写运行库", status: runtimeReady ? "ready" : "missing", detail: runtimeReady ? `Faster-Whisper、CTranslate2 与代理支持已存在 · ${python}` : "尚未安装完整，或需要升级到当前固定依赖清单" },
       { id: "model", label: `${profile.label} 模型`, status: modelReady ? "ready" : "missing", detail: modelReady ? `已缓存在 ${paths.modelRoot}` : `预计下载 ${formatStorage(profile.downloadBytes)}` },
+      { id: "media-tools", label: "FFmpeg / FFprobe", status: mediaToolsReady ? "ready" : "missing", detail: mediaToolsReady ? `${ffmpeg} · ${ffprobe}` : nativeToolAssets ? `可由项目下载约 ${formatStorage(nativeToolsDownloadBytes)} 的校验工具链` : `当前平台 ${currentRuntimePlatform} 暂无托管资产` },
       { id: "diarization", label: "说话人分离（可选）", status: !wantsDiarization ? "optional" : diarizationReady ? "ready" : "degraded", detail: !wantsDiarization ? "当前未启用，不影响基础听写" : selectedDiarizationEngine === "sherpa_onnx" ? diarizationReady ? "Sherpa-ONNX 本地运行库与模型已就绪；不需要 Hugging Face 授权" : `Sherpa-ONNX 尚未准备完整；可下载约 47 MB 模型后启用${paths.filesystem.compatible ? "" : "，运行库会放到本机兼容磁盘"}` : diarizationImportReady ? "WhisperX 独立环境已验证；任务启动预检会实际核对 Hugging Face 模型权限" : `WhisperX 未准备好；任务会立即关闭说话人分离并继续基础听写${paths.filesystem.compatible ? "" : "，运行库可稍后配置到本机兼容磁盘"}` },
-      { id: "ffmpeg", label: "音频抽取", status: executable("ffmpeg") ? "ready" : "missing", detail: executable("ffmpeg") || "未发现 FFmpeg" },
     ],
-    installable: baseInstallable || (wantsDiarization && diarizationInstallable),
+    installable: baseInstallable || Boolean(nativeToolAssets) || (wantsDiarization && diarizationInstallable),
     installationCapabilities: {
       base: baseInstallable,
       diarization: diarizationInstallable,
+      mediaTools: Boolean(nativeToolAssets),
       systemPython: systemPythonVersion ? `Python ${systemPythonVersion.join(".")}` : "未发现 Python 3",
       basePython: baseEnvironmentPythonVersion ? `Python ${baseEnvironmentPythonVersion.join(".")}` : "基础环境尚未创建",
       managedToolchain: toolchainSupported,
@@ -914,6 +964,10 @@ async function transcriptionEnvironment(input = {}) {
       pythonVersion: runtimeManifest.python.version,
       pythonReady: pythonSupports(baseEnvironmentPythonVersion, 10, 14),
       pythonPath: existsSync(baseEnvironmentPython) ? baseEnvironmentPython : "",
+      nativeToolsVersion: runtimeManifest.nativeTools?.version || "",
+      nativeToolsReady: mediaToolsReady,
+      ffmpegPath: ffmpeg || "",
+      ffprobePath: ffprobe || "",
       baseEnvironmentKey: runtimeEnvironmentKey(runtimeManifest.environments["asr-base"].packages),
       diarizationEnvironmentKey: runtimeEnvironmentKey(diarizationEnvironmentManifest(input).packages),
       isolation: `基础听写与说话人分离使用两个独立环境；当前分离引擎 ${selectedDiarizationEngine === "pyannote" ? "WhisperX / pyannote" : "Sherpa-ONNX"}`,
@@ -922,7 +976,7 @@ async function transcriptionEnvironment(input = {}) {
       healthy: baseReady,
       summary: issues[0]?.detail || "本地听写环境已通过检查",
       issues,
-      repairComponents: { runtime: !runtimeReady, model: !modelReady, diarization: wantsDiarization && !diarizationReady },
+      repairComponents: { runtime: !runtimeReady, model: !modelReady, mediaTools: !mediaToolsReady, diarization: wantsDiarization && !diarizationReady },
       lastInstall: previousInstall || null,
     },
     recommendation: baseReady
@@ -988,9 +1042,9 @@ async function persistTranscriptionInstall(operation, input) {
   });
 }
 
-async function extractTranscriptionSample(operation, source, output) {
-  const ffmpeg = executable("ffmpeg");
-  const ffprobe = executable("ffprobe");
+async function extractTranscriptionSample(operation, input, source, output) {
+  const ffmpeg = transcriptionExecutable(input, "ffmpeg");
+  const ffprobe = transcriptionExecutable(input, "ffprobe");
   if (!ffmpeg || !ffprobe) throw new Error("短音频测试需要 FFmpeg 与 FFprobe");
   const sourcePath = localSourcePath(source);
   if (!sourcePath || !existsSync(sourcePath)) throw new Error("短音频测试目前需要可读取的本地视频；网络视频请先下载或选择本地文件");
@@ -1060,7 +1114,7 @@ async function runTranscriptionTest(operation, input) {
     await mkdir(directory, { recursive: true });
     const environment = await transcriptionEnvironment(input);
     if (!environment.ready) throw new Error(`听写环境未就绪：${environment.recommendation}`);
-    const sample = await extractTranscriptionSample(operation, input.source, audioPath);
+    const sample = await extractTranscriptionSample(operation, input, input.source, audioPath);
     operationStep(operation, "执行真实听写", 52, input.mode === "api" ? "正在把确认的短音频发送给所选听写服务" : "正在本机加载模型并听写短音频");
     let result;
     if (input.mode === "api") {
@@ -1184,8 +1238,8 @@ async function runTaskTranscriptionPreflight(input = {}, source = "") {
   }
   const environment = await transcriptionEnvironment(input);
   if (!environment.baseReady) throw new Error(`听写启动预检失败：${environment.recommendation}`);
-  const ffmpeg = executable("ffmpeg");
-  const ffprobe = executable("ffprobe");
+  const ffmpeg = transcriptionExecutable(input, "ffmpeg");
+  const ffprobe = transcriptionExecutable(input, "ffprobe");
   if (!ffmpeg || !ffprobe) throw new Error("听写启动预检失败：FFmpeg 或 FFprobe 不可用");
   const directory = path.join(dataRoot, "asr-preflight", randomUUID());
   const audioPath = path.join(directory, "sample.flac");
@@ -1198,7 +1252,7 @@ async function runTaskTranscriptionPreflight(input = {}, source = "") {
     const sourcePath = localSourcePath(source);
     if (sourcePath && existsSync(sourcePath)) {
       const operation = { events: [], progress: 0 };
-      await extractTranscriptionSample(operation, sourcePath, audioPath);
+      await extractTranscriptionSample(operation, input, sourcePath, audioPath);
     } else {
       await runPreflightProcess(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000:duration=3", "-ac", "1", "-c:a", "flac", audioPath], { label: "FFmpeg 动态库与音频链路预检", timeoutMs: 30_000 });
     }
@@ -1330,18 +1384,34 @@ async function runTranscriptionInstall(operation, input) {
     const systemPython = executable("python3") || executable("python");
     const systemPythonVersion = pythonVersion(systemPython);
     let modelPython = python;
-    let existingBase = await pythonModuleState(modelPython, ["faster_whisper", "ctranslate2", "tokenizers"]);
-    if (components.model && !components.runtime && (!existingBase.faster_whisper || !existingBase.ctranslate2 || !existingBase.tokenizers)) {
+    let existingBase = await pythonModuleState(modelPython, baseTranscriptionModules);
+    if (components.mediaTools) {
+      operationStep(operation, "准备媒体工具链", 7, `正在准备应用托管 FFmpeg/FFprobe ${runtimeManifest.nativeTools.version}`);
+      await persistTranscriptionInstall(operation, input);
+      const prepared = await ensureManagedNativeTools({
+        runtimeRoot: paths.runtimeRoot,
+        manifestPath: runtimeManifestPath,
+        packagedRoot: packagedToolchainRoot,
+        fetchOptions: proxyFetchOptions(input.proxyUrl),
+        onProgress: (message) => appendTranscriptionEvent(operation, "准备媒体工具链", message),
+      });
+      for (const name of ["ffmpeg", "ffprobe"]) {
+        const command = prepared.paths[name];
+        await runInstallerStep(operation, command, ["-version"], `验证 ${name}`);
+      }
+      appendTranscriptionEvent(operation, "准备媒体工具链", `FFmpeg/FFprobe ${prepared.version} 已通过 SHA256 与启动校验并写入项目运行时（${prepared.source}）`, "done");
+    }
+    if (components.model && !components.runtime && !baseTranscriptionModules.every((name) => existingBase[name])) {
       for (const candidate of asrPythonCandidates(paths)) {
-        const candidateState = await pythonModuleState(candidate, ["faster_whisper", "ctranslate2", "tokenizers"]);
-        if (candidateState.faster_whisper && candidateState.ctranslate2 && candidateState.tokenizers) {
+        const candidateState = await pythonModuleState(candidate, baseTranscriptionModules);
+        if (baseTranscriptionModules.every((name) => candidateState[name])) {
           modelPython = candidate;
           existingBase = candidateState;
           break;
         }
       }
     }
-    if (components.model && !components.runtime && (!existingBase.faster_whisper || !existingBase.ctranslate2 || !existingBase.tokenizers)) {
+    if (components.model && !components.runtime && !baseTranscriptionModules.every((name) => existingBase[name])) {
       throw new Error("下载模型需要基础听写运行库；请同时勾选“基础听写运行库”并确认下载内容");
     }
     if ((components.runtime || components.diarization) && !uv && runtimeManifest.uv.assets[currentRuntimePlatform]) {
@@ -1377,8 +1447,8 @@ async function runTranscriptionInstall(operation, input) {
 
         operationStep(operation, "验证基础运行库", 44, "正在首次加载 Faster-Whisper；验证通过后才会替换旧环境");
         await persistTranscriptionInstall(operation, input);
-        const verified = await pythonModuleState(stagingPython, ["faster_whisper", "ctranslate2", "tokenizers", "huggingface_hub"], { timeoutMs: 120_000 });
-        const missing = ["faster_whisper", "ctranslate2", "tokenizers", "huggingface_hub"].filter((name) => !verified[name]);
+        const verified = await pythonModuleState(stagingPython, baseTranscriptionModules, { timeoutMs: 120_000 });
+        const missing = baseTranscriptionModules.filter((name) => !verified[name]);
         if (missing.length) throw new Error(`基础运行库深度验证失败：${missing.join("、")} 无法导入；${Object.values(verified._errors || {}).join("；") || "依赖不完整"}`);
         await writeFile(path.join(stagingPath, "precision-runtime.json"), `${JSON.stringify({
           environment: "asr-base",
@@ -1406,7 +1476,7 @@ async function runTranscriptionInstall(operation, input) {
     if (components.model) {
       operationStep(operation, "下载听写模型", 55, `正在准备 ${input.model || "turbo"} 模型；已下载文件会继续复用`);
       await persistTranscriptionInstall(operation, input);
-      await runInstallerStep(operation, modelPython, [path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "prepare_faster_whisper.py"), "--model", String(input.model || "turbo"), "--model-cache", paths.modelRoot], `下载 ${input.model || "turbo"} 模型`);
+      await runInstallerStep(operation, modelPython, [path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "prepare_faster_whisper.py"), "--model", String(input.model || "turbo"), "--model-cache", paths.modelRoot], `下载 ${input.model || "turbo"} 模型`, { env: applyProxyEnv({}, input.proxyUrl) });
     }
     if (components.diarization) {
       const selectedDiarizationEngine = diarizationEngine(input);
@@ -1465,6 +1535,7 @@ async function runTranscriptionInstall(operation, input) {
     const resultComponents = Object.fromEntries(operation.result.components.map((item) => [item.id, item]));
     if (components.runtime && resultComponents.runtime?.status !== "ready") throw new Error(`基础运行库配置完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
     if (components.model && resultComponents.model?.status !== "ready") throw new Error(`模型下载完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
+    if (components.mediaTools && resultComponents["media-tools"]?.status !== "ready") throw new Error(`媒体工具链配置完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
     if (components.diarization && resultComponents.diarization?.status !== "ready") throw new Error(`说话人分离配置完成但仍未通过：${operation.result.diagnostics?.summary || operation.result.recommendation}`);
     operation.progress = 100;
     appendTranscriptionEvent(operation, "完成", "所选项目已处理，请检查最终状态。", "done");
@@ -1476,6 +1547,9 @@ async function runTranscriptionInstall(operation, input) {
     operation.finishedAt = new Date().toISOString();
     delete operation.pid;
     await persistTranscriptionInstall(operation, input).catch(() => undefined);
+    if (operation.status === "failed") {
+      operation.result = await transcriptionEnvironment(input).catch(() => null);
+    }
     const lockRoot = transcriptionInstallLockRoots.get(operation.id);
     if (lockRoot && activeTranscriptionInstallRoots.get(lockRoot) === operation.id) activeTranscriptionInstallRoots.delete(lockRoot);
     transcriptionInstallLockRoots.delete(operation.id);
@@ -1487,7 +1561,7 @@ function startTranscriptionInstall(input) {
   if (input.confirmed !== true) throw new Error("请先查看下载量与缓存位置，并勾选确认");
   if (!String(input.environmentRoot || "").trim()) throw new Error("请先确认模型与项目数据文件夹");
   const components = input.components || {};
-  if (!components.runtime && !components.model && !components.diarization) throw new Error("请至少选择一个需要准备的项目");
+  if (!components.runtime && !components.model && !components.mediaTools && !components.diarization) throw new Error("请至少选择一个需要准备的项目");
   const lockRoot = transcriptionPaths(input).runtimeRoot;
   if (activeTranscriptionInstallRoots.has(lockRoot)) throw new Error("这个项目环境已经在配置中，请等待当前进度完成，不要重复启动");
   const id = randomUUID();
@@ -1528,7 +1602,7 @@ async function runModelAssistedTranscriptionInstall(operation, engine, input) {
       resources: environment.resources,
       installationCapabilities: environment.installationCapabilities,
     });
-    const prompt = `你是 GakuNiku 内置环境 Harness 的规划模型。根据脱敏报告选择最小安全配置；程序只会执行固定白名单动作，不能执行 shell。只返回一行 JSON：{"action":"prepare","runtime":true|false,"model":true|false,"diarization":"sherpa_onnx|pyannote|off","explanation":"不超过160字"}。规则：缺少基础运行库或模型时必须补齐；默认优先无需账号权限的 sherpa_onnx；只有报告明确已有 Hugging Face Token 且用户选择 pyannote 时才选 pyannote；内存或权限不足时可把可选说话人分离设为 off，但不能关闭基础听写。\n\n${JSON.stringify(safeReport)}`;
+    const prompt = `${transcriptionEnvironmentHarness}\n\n## Redacted environment report\n\n${JSON.stringify(safeReport)}`;
     try {
       const answer = await selectedEngineText(engine, prompt, { maxTokens: 700, timeoutMs: 120_000 });
       const parsed = parseStructuredReply(answer.text);
@@ -1536,6 +1610,7 @@ async function runModelAssistedTranscriptionInstall(operation, engine, input) {
         action: "prepare",
         runtime: Boolean(parsed.runtime),
         model: Boolean(parsed.model),
+        mediaTools: Boolean(parsed.mediaTools),
         diarization: ["sherpa_onnx", "pyannote", "off"].includes(parsed.diarization) ? parsed.diarization : "off",
         explanation: String(parsed.explanation || "已根据环境检查选择最小配置").slice(0, 500),
         modelLabel: answer.label,
@@ -1546,6 +1621,7 @@ async function runModelAssistedTranscriptionInstall(operation, engine, input) {
         action: "prepare",
         runtime: Boolean(repairs.runtime),
         model: Boolean(repairs.model),
+        mediaTools: Boolean(repairs.mediaTools),
         diarization: input.diarization ? (diarizationEngine(input) === "pyannote" && !String(input.hfToken || "").trim() ? "sherpa_onnx" : diarizationEngine(input)) : "off",
         explanation: `模型规划暂时不可用，已按内置 Harness 的保守方案继续：${error instanceof Error ? error.message : String(error)}`.slice(0, 500),
         fallback: true,
@@ -1557,6 +1633,7 @@ async function runModelAssistedTranscriptionInstall(operation, engine, input) {
     const components = {
       runtime: Boolean(repairs.runtime || plan.runtime),
       model: Boolean(repairs.model || plan.model),
+      mediaTools: Boolean(repairs.mediaTools || plan.mediaTools),
       diarization: Boolean(repairs.diarization && plan.diarization !== "off"),
     };
     if (plan.diarization === "pyannote" && !String(input.hfToken || "").trim()) {
@@ -1571,8 +1648,8 @@ async function runModelAssistedTranscriptionInstall(operation, engine, input) {
       diarizationEngine: plan.diarization === "off" ? diarizationEngine(input) : plan.diarization,
     };
     operation.modelPlan = plan;
-    appendTranscriptionEvent(operation, "模型配置方案", `${plan.explanation}（运行库 ${components.runtime ? "准备" : "复用"} · 模型 ${components.model ? "准备" : "复用"} · 说话人分离 ${effective.diarization ? effective.diarizationEngine : "关闭"}）`, "done");
-    if (!components.runtime && !components.model && !components.diarization) {
+    appendTranscriptionEvent(operation, "模型配置方案", `${plan.explanation}（运行库 ${components.runtime ? "准备" : "复用"} · 模型 ${components.model ? "准备" : "复用"} · 媒体工具 ${components.mediaTools ? "准备" : "复用"} · 说话人分离 ${effective.diarization ? effective.diarizationEngine : "关闭"}）`, "done");
+    if (!components.runtime && !components.model && !components.mediaTools && !components.diarization) {
       const result = await transcriptionEnvironment(effective);
       operation.status = "completed";
       operation.progress = 100;
@@ -2802,8 +2879,13 @@ function adapter(config) {
   const builtinHarness = name === "builtin-api" || name === "builtin-local";
   const command = builtinHarness ? process.execPath : executable(name);
   if (!command) throw new Error(`本机没有发现 ${name}，请先安装或改用其他 Agent。`);
-  const extraToolDirectories = [executable("uvx"), executable("yutto")].filter(Boolean).map((value) => path.dirname(value));
+  const localFasterWhisper = config.transcription?.mode === "local" && config.transcription?.provider === "faster_whisper";
+  const ffmpeg = localFasterWhisper ? transcriptionExecutable(config.transcription, "ffmpeg") : "";
+  const ffprobe = localFasterWhisper ? transcriptionExecutable(config.transcription, "ffprobe") : "";
+  const extraToolDirectories = [executable("uvx"), executable("yutto"), ffmpeg, ffprobe].filter(Boolean).map((value) => path.dirname(value));
   const env = { ...process.env, PATH: [...new Set(extraToolDirectories), process.env.PATH || ""].filter(Boolean).join(path.delimiter) };
+  if (ffmpeg) env.PSS_FFMPEG_PATH = ffmpeg;
+  if (ffprobe) env.PSS_FFPROBE_PATH = ffprobe;
   Object.assign(env, applyProxyEnv(env, config.engine?.proxyUrl || config.search?.proxyUrl));
   const key = String(config.engine?.apiKey || "").trim();
   if (mode === "api") {

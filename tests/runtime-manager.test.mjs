@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { executableNames, findExecutable, managedInstallCapabilities, managedUvPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "../local-agent-bridge/runtime-manager.mjs";
+import { ensureManagedNativeTools, executableNames, findExecutable, managedInstallCapabilities, managedNativeToolPath, managedUvPath, readRuntimeManifest, runtimeEnvironmentKey, runtimePlatformKey } from "../local-agent-bridge/runtime-manager.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const manifestPath = path.join(projectRoot, "runtime", "runtime-manifest.json");
@@ -47,12 +47,47 @@ test("runtime manifest pins tools and every supported uv archive checksum", asyn
     assert.ok(environment.packages.length > 0);
     assert.ok(environment.packages.every((item) => item.includes("==")), `unversioned package in ${JSON.stringify(environment.packages)}`);
   }
+  assert.ok(manifest.environments["asr-base"].packages.includes("socksio==1.0.0"), "ASR runtime must support inherited SOCKS proxies");
+  for (const target of ["macos-arm64", "windows-x64"]) {
+    for (const name of ["ffmpeg", "ffprobe"]) {
+      const asset = manifest.nativeTools.assets[target][name];
+      assert.match(asset.url, new RegExp(`/download/${manifest.nativeTools.version.replaceAll(".", "\\.")}/`));
+      assert.match(asset.sha256, /^[a-f0-9]{64}$/);
+      assert.ok(asset.bytes > 10_000_000);
+    }
+  }
   for (const asset of Object.values(manifest.environments["diarization-sherpa"].models)) {
     assert.match(asset.url, /^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\//);
     assert.match(asset.sha256, /^[a-f0-9]{64}$/);
     assert.ok(asset.bytes > 1_000_000);
   }
   assert.match(managedUvPath("/tmp/pss", manifest, "win32", "x64"), /windows-x64[\\/]uv\.exe$/);
+  assert.match(managedNativeToolPath("/tmp/pss", manifest, "ffmpeg", "win32", "x64"), /windows-x64[\\/]ffmpeg\.exe$/);
+});
+
+test("managed FFmpeg and FFprobe are copied atomically into the project runtime", { skip: process.platform === "win32" }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "pss-native-tools-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const runtimeRoot = path.join(directory, "project-runtime");
+  const packagedRoot = path.join(directory, "packaged");
+  const packagedPlatform = path.join(packagedRoot, "macos-arm64");
+  await mkdir(packagedPlatform, { recursive: true });
+  for (const name of ["ffmpeg", "ffprobe"]) {
+    const executable = path.join(packagedPlatform, name);
+    await writeFile(executable, `#!/bin/sh\necho ${name} fixture\n`, "utf8");
+    await chmod(executable, 0o755);
+  }
+
+  const result = await ensureManagedNativeTools({ runtimeRoot, manifestPath, packagedRoot, platform: "darwin", arch: "arm64" });
+  const manifest = await readRuntimeManifest(manifestPath);
+  assert.equal(result.source, "packaged");
+  assert.equal(result.version, manifest.nativeTools.version);
+  for (const name of ["ffmpeg", "ffprobe"]) {
+    assert.equal(result.paths[name], managedNativeToolPath(runtimeRoot, manifest, name, "darwin", "arm64"));
+    assert.match(await readFile(result.paths[name], "utf8"), new RegExp(`${name} fixture`));
+  }
+  const installState = JSON.parse(await readFile(path.join(path.dirname(result.paths.ffmpeg), "install.json"), "utf8"));
+  assert.equal(installState.platform, "macos-arm64");
 });
 
 test("environment fingerprints are deterministic and order independent", async () => {

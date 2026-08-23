@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 
 const managedUvInstallLocks = new Map();
+const managedNativeToolInstallLocks = new Map();
 
 export function runtimePlatformKey(platform = process.platform, arch = process.arch) {
   const family = platform === "darwin" ? "macos" : platform === "win32" ? "windows" : platform === "linux" ? "linux" : platform;
@@ -71,6 +72,14 @@ export function managedUvxPath(runtimeRoot, manifest, platform = process.platfor
   return path.join(managedUvDirectory(runtimeRoot, manifest, platform, arch), platform === "win32" ? "uvx.exe" : "uvx");
 }
 
+function managedNativeToolDirectory(runtimeRoot, manifest, platform = process.platform, arch = process.arch) {
+  return path.join(runtimeRoot, "toolchain", "native", manifest.nativeTools.version, runtimePlatformKey(platform, arch));
+}
+
+export function managedNativeToolPath(runtimeRoot, manifest, name, platform = process.platform, arch = process.arch) {
+  return path.join(managedNativeToolDirectory(runtimeRoot, manifest, platform, arch), platform === "win32" ? `${name}.exe` : name);
+}
+
 async function findExtractedExecutable(root, names) {
   const queue = [root];
   while (queue.length) {
@@ -96,9 +105,9 @@ async function run(command, args, options = {}) {
   if (code !== 0) throw new Error(stderr.trim() || `${command} 解压失败（代码 ${code}）`);
 }
 
-async function downloadVerified(url, destination, expectedSha256, fetchOptions = {}) {
+async function downloadVerified(url, destination, expectedSha256, fetchOptions = {}, label = "托管工具链") {
   const response = await fetch(url, { signal: AbortSignal.timeout(180_000), ...fetchOptions });
-  if (!response.ok || !response.body) throw new Error(`下载托管工具链失败：HTTP ${response.status}`);
+  if (!response.ok || !response.body) throw new Error(`下载${label}失败：HTTP ${response.status}`);
   const file = await open(destination, "wx");
   const hash = createHash("sha256");
   try {
@@ -110,7 +119,7 @@ async function downloadVerified(url, destination, expectedSha256, fetchOptions =
     await file.close();
   }
   const actual = hash.digest("hex");
-  if (actual !== expectedSha256) throw new Error(`uv 下载校验失败：期望 ${expectedSha256.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…`);
+  if (actual !== expectedSha256) throw new Error(`${label} SHA256 校验失败：期望 ${expectedSha256.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…`);
 }
 
 async function ensureManagedUvUnlocked(options) {
@@ -154,7 +163,7 @@ async function ensureManagedUvUnlocked(options) {
   await rm(staging, { recursive: true, force: true });
   await mkdir(extracted, { recursive: true });
   try {
-    await downloadVerified(asset.url, archive, asset.sha256, fetchOptions);
+    await downloadVerified(asset.url, archive, asset.sha256, fetchOptions, "uv");
     onProgress("uv 已下载并通过 SHA256 校验，正在解压");
     if (asset.format === "zip") {
       if (platform !== "win32") throw new Error("ZIP 工具链包只允许在 Windows 解压");
@@ -194,6 +203,70 @@ export function ensureManagedUv(options) {
   if (existing) return existing;
   const pending = ensureManagedUvUnlocked(options).finally(() => managedUvInstallLocks.delete(key));
   managedUvInstallLocks.set(key, pending);
+  return pending;
+}
+
+async function ensureManagedNativeToolsUnlocked(options) {
+  const { runtimeRoot, manifestPath, packagedRoot, onProgress = () => {}, fetchOptions = {} } = options;
+  const platform = options.platform || process.platform;
+  const arch = options.arch || process.arch;
+  const manifest = await readRuntimeManifest(manifestPath);
+  const platformKey = runtimePlatformKey(platform, arch);
+  const assets = manifest.nativeTools?.assets?.[platformKey];
+  if (!assets?.ffmpeg || !assets?.ffprobe) throw new Error(`当前发布包暂不支持为 ${platformKey} 托管 FFmpeg/FFprobe`);
+  const toolNames = ["ffmpeg", "ffprobe"];
+  const targetDirectory = managedNativeToolDirectory(runtimeRoot, manifest, platform, arch);
+  const targets = Object.fromEntries(toolNames.map((name) => [name, managedNativeToolPath(runtimeRoot, manifest, name, platform, arch)]));
+  if (toolNames.every((name) => executableFile(targets[name], platform))) {
+    return { paths: targets, version: manifest.nativeTools.version, source: "managed" };
+  }
+
+  const packaged = Object.fromEntries(toolNames.map((name) => [name, path.join(packagedRoot, platformKey, platform === "win32" ? `${name}.exe` : name)]));
+  const packagedReady = toolNames.every((name) => executableFile(packaged[name], platform));
+  const staging = `${targetDirectory}.staging-${Date.now()}`;
+  await rm(staging, { recursive: true, force: true });
+  await mkdir(staging, { recursive: true });
+  try {
+    if (packagedReady) {
+      onProgress("正在启用随应用提供的 FFmpeg/FFprobe 工具链");
+      for (const name of toolNames) {
+        const destination = path.join(staging, path.basename(targets[name]));
+        await copyFile(packaged[name], destination);
+        if (platform !== "win32") await chmod(destination, 0o755);
+      }
+    } else {
+      for (const name of toolNames) {
+        const asset = assets[name];
+        onProgress(`正在下载应用托管 ${name} ${manifest.nativeTools.version}`);
+        const destination = path.join(staging, path.basename(targets[name]));
+        await downloadVerified(asset.url, destination, asset.sha256, fetchOptions, name);
+        if (platform !== "win32") await chmod(destination, 0o755);
+      }
+    }
+    await writeFile(path.join(staging, "install.json"), `${JSON.stringify({
+      version: manifest.nativeTools.version,
+      platform: platformKey,
+      assets: Object.fromEntries(toolNames.map((name) => [name, assets[name].sha256])),
+      installedAt: new Date().toISOString(),
+    }, null, 2)}\n`, "utf8");
+    await mkdir(path.dirname(targetDirectory), { recursive: true });
+    await rm(targetDirectory, { recursive: true, force: true });
+    await rename(staging, targetDirectory);
+    return { paths: targets, version: manifest.nativeTools.version, source: packagedReady ? "packaged" : "download" };
+  } catch (error) {
+    await rm(targetDirectory, { recursive: true, force: true });
+    throw error;
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
+export function ensureManagedNativeTools(options) {
+  const key = `${path.resolve(options.runtimeRoot)}:${options.platform || process.platform}:${options.arch || process.arch}`;
+  const existing = managedNativeToolInstallLocks.get(key);
+  if (existing) return existing;
+  const pending = ensureManagedNativeToolsUnlocked(options).finally(() => managedNativeToolInstallLocks.delete(key));
+  managedNativeToolInstallLocks.set(key, pending);
   return pending;
 }
 

@@ -42,11 +42,12 @@ test("server-renders the subtitle studio product", async () => {
 });
 
 test("ships the real harness and low-memory local bridge", async () => {
-  const [component, bridge, apiHelper, skill, packageJson] = await Promise.all([
+  const [component, bridge, apiHelper, skill, environmentHarness, packageJson] = await Promise.all([
     readFile(new URL("../app/SubtitleStudio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../local-agent-bridge/server.mjs", import.meta.url), "utf8"),
     readFile(new URL("../local-agent-bridge/api-model-call.mjs", import.meta.url), "utf8"),
     readFile(new URL("../harness/precision-video-subtitles/SKILL.md", import.meta.url), "utf8"),
+    readFile(new URL("../harness/precision-video-subtitles/references/transcription-environment-agent.md", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -72,29 +73,30 @@ test("ships the real harness and low-memory local bridge", async () => {
     "API 模式",
     "Agent Skill",
     "无需 Agent CLI · 模型直连内置 Harness",
-    "让第一步模型自动配置",
     "推荐配置",
-    "采用推荐参数并检查",
+    "按顺序完成这 3 项",
+    "填写素材与输出",
+    "选择原文听写方案",
     "开始翻译并统一检查",
     "工作流概览",
     "下一步行动",
-    "原文听写引擎",
-    "检查依赖，再决定是否下载",
-    "检查当前环境",
+    "检查并配置项目环境",
+    "检查项目环境",
     "模型与项目数据文件夹",
-    "立即配置缺失环境",
-    "已下载的模型不会重复下载",
-    "安全配置本地环境",
+    "环境缺失项",
+    "由第一页 AI 配置项目环境",
+    "LOCAL ENV AGENT",
+    "启动本地环境 Agent",
+    "手动选择配置项",
+    "按所选项配置项目环境",
+    "查看技术诊断与原始错误",
+    "模型只选择固定修复项",
     "Sherpa-ONNX 本地说话人分离（推荐）",
     "OPTIONAL ENHANCEMENT",
     "暂不使用说话人分离",
-    "只补齐当前增强能力",
     "WhisperX / pyannote（高级 · 需 HF 权限）",
-    "本次配置为什么没有完成",
-    "让第一步模型自动配置",
-    "模型只读取脱敏检查结果",
     "可选：用当前视频测试约 20 秒",
-    "真实短音频测试是可选的质量诊断",
+    "真实短音频测试是可选诊断",
     "Faster-Whisper",
     "OpenAI Audio API",
     "模型质量",
@@ -164,7 +166,7 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.doesNotMatch(component, /本地视频还需通过短音频测试/);
   assert.doesNotMatch(component, /requiresTranscriptionSampleTest|transcriptionTestFingerprint/i);
   assert.doesNotMatch(component, /尚未确认 Precision harness|允许本任务使用外部模型？|externalConsentOpen/);
-  assert.match(component, /环境位置、依赖与下载选项/);
+  assert.match(component, /查看依赖清单、资源用量和运行目录/);
   assert.match(component, /transcriptionRequestedReady/);
   assert.match(component, /transcriptionDiarizationNeedsSetup/);
   assert.match(component, /prepareDiarizationEnvironment/);
@@ -278,6 +280,10 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(skill, /user-approved research preview/);
   assert.match(skill, /member_color.*color_hex.*color_scope.*color_source_url.*color_confidence/);
   assert.match(skill, /one linked speaker entity, not two independent people/);
+  assert.match(environmentHarness, /smallest valid plan from the declared allowlist/);
+  assert.match(environmentHarness, /Do not write shell commands/);
+  assert.match(environmentHarness, /"mediaTools":true/);
+  assert.match(bridge, /transcriptionEnvironmentHarness/);
   assert.match(component, /终止任务/);
   assert.match(component, /确认终止当前任务/);
   assert.match(component, /\/cancel/);

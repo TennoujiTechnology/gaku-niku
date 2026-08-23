@@ -158,6 +158,20 @@ async function installUvToolchain(target, root) {
   }
 }
 
+async function installNativeToolchain(target, root) {
+  const assets = runtimeManifest.nativeTools?.assets?.[target];
+  if (!assets?.ffmpeg || !assets?.ffprobe) throw new Error(`runtime-manifest.json 缺少 ${target} 的 FFmpeg/FFprobe 资产`);
+  const windows = target.startsWith("windows-");
+  const destination = path.join(root, "runtime", "toolchain", target);
+  await mkdir(destination, { recursive: true });
+  for (const name of ["ffmpeg", "ffprobe"]) {
+    const source = await downloadVerified(assets[name]);
+    const targetPath = path.join(destination, windows ? `${name}.exe` : name);
+    await copyFile(source, targetPath);
+    if (!windows) await chmod(targetPath, 0o755);
+  }
+}
+
 async function addApplicationFiles(root) {
   for (const [source, destination] of [
     ["standalone", "standalone"],
@@ -231,6 +245,8 @@ async function validatePackage(target, root) {
     "node_modules/undici/index.js",
     "runtime/runtime-manifest.json",
     `runtime/toolchain/${target}/${target.startsWith("windows-") ? "uv.exe" : "uv"}`,
+    `runtime/toolchain/${target}/${target.startsWith("windows-") ? "ffmpeg.exe" : "ffmpeg"}`,
+    `runtime/toolchain/${target}/${target.startsWith("windows-") ? "ffprobe.exe" : "ffprobe"}`,
     target.startsWith("windows-") ? "runtime/node/node.exe" : "runtime/node/bin/node",
     releaseManifest.targets[target].launcher,
   ];
@@ -267,6 +283,7 @@ for (const target of targets) {
   await addApplicationFiles(root);
   await installNodeRuntime(target, root);
   await installUvToolchain(target, root);
+  await installNativeToolchain(target, root);
   await addLauncher(target, root);
   await removeAppleDouble(root);
   await validatePackage(target, root);

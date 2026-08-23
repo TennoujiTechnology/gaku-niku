@@ -1,6 +1,6 @@
 # Managed toolchain payloads
 
-Release builds may place verified `uv` executables here before packaging:
+Release builds place verified `uv`, `ffmpeg`, and `ffprobe` executables here before packaging:
 
 - `macos-arm64/uv`
 - `macos-arm64/uvx`
@@ -11,12 +11,14 @@ Release builds may place verified `uv` executables here before packaging:
 - `windows-x64/uv.exe`
 - `windows-x64/uvx.exe`
 
-Release packages may also place platform-native `ffmpeg`, `ffprobe`, and
-`yt-dlp` executables in the same target folder. The bridge prefers these
-packaged tools, then falls back to the user's `PATH`. Agent CLIs remain
+The bridge copies packaged media tools into the selected project's managed
+runtime. If they are absent from a development checkout, the confirmed
+environment setup downloads the direct binaries pinned in
+`runtime-manifest.json`, verifies each SHA256, and then validates both with
+`-version`. It does not modify the system `PATH` or a system package manager.
+`yt-dlp` may also be provided in the same target folder. Agent CLIs remain
 external adapters so their existing logins and credentials are never copied
 into the project.
 
-If the matching executable is absent, the local bridge downloads the pinned
-asset from `runtime-manifest.json` only after the user confirms environment
-installation. The downloaded archive is SHA256-verified before extraction.
+All network installation remains gated by the user's environment-download
+confirmation in the Studio UI.

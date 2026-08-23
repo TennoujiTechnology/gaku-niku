@@ -14,6 +14,16 @@ for (const target of targets) {
   assert.match(asset.sha256, /^[a-f0-9]{64}$/);
 }
 
+for (const target of ["macos-arm64", "windows-x64"]) {
+  const assets = manifest.nativeTools?.assets?.[target];
+  assert.ok(assets?.ffmpeg && assets?.ffprobe, `缺少 ${target} 的 FFmpeg/FFprobe 发布资产`);
+  for (const [name, asset] of Object.entries(assets)) {
+    assert.match(asset.url, /^https:\/\/github\.com\/shaka-project\/static-ffmpeg-binaries\/releases\/download\//, `${name} 必须来自固定 Release`);
+    assert.match(asset.sha256, /^[a-f0-9]{64}$/, `${target} ${name} 缺少 SHA256`);
+    assert.ok(asset.bytes > 10_000_000, `${target} ${name} 体积异常`);
+  }
+}
+
 for (const [name, environment] of Object.entries(manifest.environments)) {
   assert.ok(environment.packages.length > 0, `${name} 没有依赖`);
   assert.ok(environment.packages.every((item) => /^[A-Za-z0-9_.-]+==[^=]+$/.test(item)), `${name} 存在未固定版本的依赖`);
@@ -26,4 +36,4 @@ for (const [name, asset] of Object.entries(manifest.environments["diarization-sh
   assert.ok(asset.bytes > 1_000_000, `${name} 模型体积异常`);
 }
 
-process.stdout.write(`runtime manifest OK · uv ${manifest.uv.version} · Python ${manifest.python.version}\n`);
+process.stdout.write(`runtime manifest OK · uv ${manifest.uv.version} · FFmpeg/FFprobe ${manifest.nativeTools.version} · Python ${manifest.python.version}\n`);
