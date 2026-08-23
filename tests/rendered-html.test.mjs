@@ -145,7 +145,17 @@ test("ships the real harness and low-memory local bridge", async () => {
   }
   assert.match(component, /function returnHomeAfterTermination/);
   assert.match(component, /localStorage\.removeItem\(ACTIVE_JOB_STORE\)/);
+  assert.match(component, /localStorage\.removeItem\(LAST_JOB_STORE\)/);
   assert.match(component, /setWorkspace\("prepare"\)/);
+  assert.match(component, /setCameraFocus\("engine"\)/);
+  assert.match(component, /setSource\(""\)/);
+  assert.match(component, /setResearchPreview\(""\)/);
+  assert.match(component, /setProjectFileName\(""\)/);
+  assert.match(component, /returnHomeAfterTermination\(message\)/);
+  assert.match(component, /response\.status === 400 \|\| response\.status === 404/);
+  assert.match(component, /当前任务记录已不存在/);
+  assert.doesNotMatch(component, /if \(data\.status === "cancelled"\) returnHomeAfterTermination/);
+  assert.match(component, /终止并新建项目/);
   assert.match(component, /从历史任务中重新打开/);
   const projectSnapshotSource = component.slice(component.indexOf("function currentProjectSnapshot"), component.indexOf("function saveStudioProject"));
   assert.match(projectSnapshotSource, /gakuniku-project|PROJECT_FILE_FORMAT/);
@@ -285,7 +295,7 @@ test("ships the real harness and low-memory local bridge", async () => {
   assert.match(environmentHarness, /"mediaTools":true/);
   assert.match(bridge, /transcriptionEnvironmentHarness/);
   assert.match(component, /终止任务/);
-  assert.match(component, /确认终止当前任务/);
+  assert.match(component, /终止并新建项目/);
   assert.match(component, /\/cancel/);
   assert.match(component, /className="topbar-terminate-button"/);
   assert.match(component, /terminateConfirmOpen && jobId/);

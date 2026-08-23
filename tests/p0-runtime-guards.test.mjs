@@ -67,6 +67,107 @@ test("adaptive API batches shrink only the child that reaches the output limit",
   assert.equal(output.tokenUsage.output, 2 * 900 + 3 * 120);
 });
 
+test("model helper records empty responses and lets a controller retry with MiMo thinking disabled", async (t) => {
+  let requestBody = null;
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        model: "mimo-test",
+        choices: [{ finish_reason: "length", message: { content: "", reasoning_content: "internal reasoning only" } }],
+        usage: { prompt_tokens: 30, completion_tokens: 256, total_tokens: 286 },
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const directory = await mkdtemp(path.join(os.tmpdir(), "gakuniku-empty-model-"));
+  const inputPath = path.join(directory, "input.json");
+  const outputPath = path.join(directory, "output.json");
+  await writeFile(inputPath, JSON.stringify({ messages: [{ role: "user", content: "return json" }], maxTokens: 400, reasoningEffort: "low" }));
+  const child = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "api-model-call.mjs"), inputPath, outputPath], {
+    cwd: projectRoot,
+    env: { ...process.env, PSS_API_PROVIDER: "mimo", PSS_API_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, PSS_API_KEY: "test", PSS_API_MODEL: "mimo-test" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const code = await new Promise((resolve) => child.on("close", resolve));
+  assert.notEqual(code, 0);
+  assert.equal(requestBody.thinking.type, "disabled");
+  const diagnostic = JSON.parse(await readFile(`${outputPath}.error.json`, "utf8"));
+  assert.equal(diagnostic.code, "MODEL_EMPTY_RESPONSE");
+  assert.equal(diagnostic.finishReason, "length");
+  assert.equal(diagnostic.usage.completion_tokens, 256);
+  assert.match(diagnostic.reasoningExcerpt, /internal reasoning/);
+});
+
+test("controller requests a native harness_action tool and reads its structured arguments", async (t) => {
+  let requestBody = null;
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      const action = { type: "tool", summary: "读取 manifest", calls: [{ tool: "read_text", input: { path: "/tmp/job/manifest.json" } }] };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        model: "mimo-test",
+        choices: [{ finish_reason: "tool_calls", message: { content: "", tool_calls: [{ type: "function", function: { name: "harness_action", arguments: JSON.stringify(action) } }] } }],
+        usage: { prompt_tokens: 30, completion_tokens: 40, total_tokens: 70 },
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const directory = await mkdtemp(path.join(os.tmpdir(), "gakuniku-structured-controller-"));
+  const inputPath = path.join(directory, "input.json");
+  const outputPath = path.join(directory, "output.json");
+  await writeFile(inputPath, JSON.stringify({ messages: [{ role: "user", content: "next action" }], responseFormat: "harness_action", reasoningEffort: "low" }));
+  const child = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "api-model-call.mjs"), inputPath, outputPath], {
+    cwd: projectRoot,
+    env: { ...process.env, PSS_API_PROVIDER: "mimo", PSS_API_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, PSS_API_KEY: "test", PSS_API_MODEL: "mimo-test" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const code = await new Promise((resolve) => child.on("close", resolve));
+  assert.equal(code, 0, stderr);
+  assert.equal(requestBody.thinking.type, "disabled");
+  assert.equal(requestBody.tools[0].function.name, "harness_action");
+  assert.equal(requestBody.tool_choice.function.name, "harness_action");
+  const output = JSON.parse(await readFile(outputPath, "utf8"));
+  assert.deepEqual(JSON.parse(output.text), { type: "tool", summary: "读取 manifest", calls: [{ tool: "read_text", input: { path: "/tmp/job/manifest.json" } }] });
+});
+
+test("manifest helper rejects invented phases and non-array evidence", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "gakuniku-manifest-schema-"));
+  const manifestPath = path.join(directory, "manifest.json");
+  const patchPath = path.join(directory, "patch.json");
+  const phaseIds = ["acquire", "research", "source_transcript", "translate", "resolve_ambiguities", "subtitle_qc", "mux", "final_validation"];
+  await writeFile(manifestPath, JSON.stringify({ phases: Object.fromEntries(phaseIds.map((id) => [id, { status: "pending", evidence: [] }])) }));
+  await writeFile(patchPath, JSON.stringify({ phases: { acquire_source: { status: "complete", evidence: "bad" } } }));
+  const invalid = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "manifest-update.mjs"), manifestPath, patchPath], { stdio: ["ignore", "pipe", "pipe"] });
+  let invalidStderr = "";
+  invalid.stderr.on("data", (chunk) => { invalidStderr += chunk; });
+  assert.notEqual(await new Promise((resolve) => invalid.on("close", resolve)), 0);
+  assert.match(invalidStderr, /不允许未知阶段：acquire_source/);
+
+  await writeFile(patchPath, JSON.stringify({ phases: { acquire: { status: "complete", evidence: ["source ready"] }, research: { status: "in_progress", evidence: ["research/brief.md"] } } }));
+  const valid = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "manifest-update.mjs"), manifestPath, patchPath], { stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(await new Promise((resolve) => valid.on("close", resolve)), 0);
+  const updated = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert.deepEqual(updated.phases.research.evidence, ["research/brief.md"]);
+
+  await writeFile(patchPath, JSON.stringify({ phases: { translate: { status: "in_progress", evidence: [] } } }));
+  const outOfOrder = spawn(process.execPath, [path.join(projectRoot, "local-agent-bridge", "manifest-update.mjs"), manifestPath, patchPath], { stdio: ["ignore", "pipe", "pipe"] });
+  let orderError = "";
+  outOfOrder.stderr.on("data", (chunk) => { orderError += chunk; });
+  assert.notEqual(await new Promise((resolve) => outOfOrder.on("close", resolve)), 0);
+  assert.match(orderError, /应先处理 research|阶段不能越序/);
+});
+
 test("job launch source contains real preflight, immediate diarization downgrade, and manifest helper enforcement", async () => {
   const [server, skill, environmentHarness, launcher, resourceManager, studio] = await Promise.all([
     readFile(new URL("../local-agent-bridge/server.mjs", import.meta.url), "utf8"),

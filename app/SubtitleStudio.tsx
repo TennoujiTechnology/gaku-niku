@@ -1063,6 +1063,7 @@ export function SubtitleStudio() {
   const workflowStepRefs = useRef<Record<PrepareStage, HTMLElement | null>>({ engine: null, source: null, research: null, harness: null });
   const completedJobHydratedRef = useRef("");
   const completedJobAutoOpenedRef = useRef("");
+  const historicalJobViewRef = useRef("");
 
   const sourceKind = detectSourceKind(source);
   const selectedCue = cues.find((cue) => cue.id === selectedCueId) ?? cues[0];
@@ -1392,6 +1393,7 @@ export function SubtitleStudio() {
         setManifestLimitations(Array.isArray(data.manifest?.limitations) ? data.manifest.limitations.map(String) : []);
         setManifestNotices(Array.isArray(data.manifest?.notices) ? data.manifest.notices.map(String) : []);
         setJobDiagnostics(data.diagnostics || null);
+        if (typeof data.source === "string" && data.source.trim()) setSource(data.source);
         if (Array.isArray(data.trace)) setTrace(data.trace);
         if (data.status === "completed") {
           setProgress(100);
@@ -1424,6 +1426,12 @@ export function SubtitleStudio() {
           return;
         }
         if (data.status === "cancelled") {
+          if (historicalJobViewRef.current === jobId) {
+            setWorkspace("running");
+            setJobBlocker(data.blocker || null);
+            setRunError("");
+            return;
+          }
           returnHomeAfterTermination(data.message ?? "任务已终止，已有成果已保留，可从历史任务中重新打开");
           return;
         }
@@ -2586,6 +2594,7 @@ export function SubtitleStudio() {
       if (!response.ok) throw new Error(data.error ?? "任务创建失败");
       completedJobHydratedRef.current = "";
       completedJobAutoOpenedRef.current = "";
+      historicalJobViewRef.current = "";
       setJobId(data.id);
       setJobRunStatus("running");
       setActiveJobConsentFingerprint(taskExternalProcessingConsent?.fingerprint || "");
@@ -2601,6 +2610,7 @@ export function SubtitleStudio() {
     if (!jobId) return;
     completedJobHydratedRef.current = "";
     completedJobAutoOpenedRef.current = "";
+    historicalJobViewRef.current = "";
     if (currentExternalProcessingPlan.required && !externalProcessingConsent && activeJobConsentFingerprint !== currentExternalProcessingPlan.fingerprint) {
       setWorkspace("prepare");
       focusPrepareStage("harness");
@@ -2658,6 +2668,8 @@ export function SubtitleStudio() {
       if (!response.ok) throw new Error(data.error || "没有找到这个历史任务");
       completedJobHydratedRef.current = "";
       completedJobAutoOpenedRef.current = data.status === "completed" ? id : "";
+      historicalJobViewRef.current = id;
+      if (typeof data.source === "string" && data.source.trim()) setSource(data.source);
       setJobId(id);
       setJobRunStatus(["running", "blocked", "failed", "cancelled", "completed"].includes(data.status) ? data.status as JobRunStatus : "idle");
       setRunMessage(data.message || "正在载入历史任务记录");
@@ -2673,11 +2685,46 @@ export function SubtitleStudio() {
 
   function returnHomeAfterTermination(message: string) {
     window.localStorage.removeItem(ACTIVE_JOB_STORE);
+    window.localStorage.removeItem(LAST_JOB_STORE);
+    if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+    videoRef.current?.pause();
     completedJobHydratedRef.current = "";
     completedJobAutoOpenedRef.current = "";
+    historicalJobViewRef.current = "";
     setJobId("");
     setJobRunStatus("idle");
     setWorkspace("prepare");
+    setCameraFocus("engine");
+    setSource("");
+    setPreviewUrl("");
+    setOutputPath("~/Movies/Precision Subtitles");
+    setFormats(["ass", "srt", "mkv"]);
+    setTranscriptionTestStage("idle");
+    setTranscriptionTestDetail("尚未测试（可选，不影响后续）");
+    setTranscriptionTestResult(null);
+    setTranscriptionUploadConfirmed(false);
+    setTranscriptionCheckError("");
+    setTranscriptionInstallOpen(false);
+    setKeywords(["BanG Dream!", "MyGO!!!!!", "迷子集会"]);
+    setKeywordDraft("");
+    setSelectedSites(["official", "wikipedia", "fandom", "video"]);
+    setCustomSites("");
+    setResearchPreview("");
+    setResearchStage("等待开始检索");
+    setResearchEvents([]);
+    setResearchOpen(false);
+    setKnowledgeOpen(false);
+    setKnowledgeIds([]);
+    setKnowledgeTitle("");
+    setHarnessOpen(false);
+    setHarnessText(harnessOriginal);
+    setDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS);
+    setConfirmedDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS);
+    setAmbiguityReviewMode("pragmatic");
+    setExternalConsentChecked(false);
+    setActiveJobConsentFingerprint("");
+    setTestOpen(false);
+    setHistoryDialogOpen(false);
     setTerminateConfirmOpen(false);
     setJobBlocker(null);
     setSelectedPhaseId("");
@@ -2693,7 +2740,25 @@ export function SubtitleStudio() {
     setJobTokenUsage(emptyTokenUsage());
     setManifestLimitations([]);
     setManifestNotices([]);
-    setProjectNotice(message);
+    setRoles(initialRoles.map((role) => ({ ...role })));
+    setCues(initialCues.map((cue) => ({ ...cue })));
+    setSelectedCueId(1);
+    setCurrentTime(0);
+    setIsPlaying(false);
+    setTimelineZoom(56);
+    setTimelineTool("select");
+    setSearch("");
+    setOnlyFlagged(false);
+    setFontFamily("Noto Sans CJK SC");
+    setFontSize(42);
+    setFontWeight(700);
+    setOutline(3);
+    setGlow(8);
+    setShadow(3);
+    resetReviewHistory();
+    setSaved(true);
+    setProjectFileName("");
+    setProjectNotice(`${message}；已回到新项目，原任务仍可从历史任务打开`);
   }
 
   async function terminateCurrentJob() {
@@ -2703,15 +2768,16 @@ export function SubtitleStudio() {
     try {
       const response = await fetch(`${BRIDGE_URL}/api/jobs/${jobId}/cancel`, { method: "POST" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "无法终止任务");
-      if (["running", "blocked", "failed", "cancelled", "completed"].includes(data.status)) setJobRunStatus(data.status as JobRunStatus);
-      const message = data.message || "任务已终止，已有成果已保留，可从历史任务中重新打开";
-      if (data.status === "cancelled") returnHomeAfterTermination(message);
-      else {
-        setRunMessage(message);
-        setTerminateConfirmOpen(false);
-        setJobPollRevision((value) => value + 1);
+      if (!response.ok) {
+        const missingJob = (response.status === 400 || response.status === 404) && String(data.error || "").includes("任务不存在");
+        if (missingJob) {
+          returnHomeAfterTermination("当前任务记录已不存在");
+          return;
+        }
+        throw new Error(data.error || "无法终止任务");
       }
+      const message = data.message || "任务已终止";
+      returnHomeAfterTermination(message);
     } catch (error) {
       setRunError(error instanceof Error ? error.message : "无法终止任务");
     } finally {
@@ -3020,7 +3086,7 @@ export function SubtitleStudio() {
 
       {projectNotice && <div className="project-file-notice" role="status"><FloppyDisk size={15} /><span>{projectNotice}</span><button type="button" aria-label="关闭项目提示" onClick={() => setProjectNotice("")}>×</button></div>}
 
-      {terminateConfirmOpen && jobId && <div className="terminate-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !terminateBusy) setTerminateConfirmOpen(false); }}><section className="terminate-confirm terminate-dialog" role="alertdialog" aria-modal="true" aria-labelledby="terminate-dialog-title"><div><strong id="terminate-dialog-title">确认终止当前任务？</strong><span>{jobRunStatus === "running" ? "会立即停止 Agent 与其子进程，但不会删除已完成阶段和文件，之后仍可断点继续。" : "无论当前处于阻塞、失败、精修或其他页面，都可以执行终止；已经完成或终止的任务只会安全确认状态。"}</span></div><button className="secondary-button" disabled={terminateBusy} onClick={() => setTerminateConfirmOpen(false)}>返回</button><button className="terminate-confirm-button" disabled={terminateBusy} onClick={terminateCurrentJob}>{terminateBusy ? "正在终止…" : "确认终止"}</button></section></div>}
+      {terminateConfirmOpen && jobId && <div className="terminate-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !terminateBusy) setTerminateConfirmOpen(false); }}><section className="terminate-confirm terminate-dialog" role="alertdialog" aria-modal="true" aria-labelledby="terminate-dialog-title"><div><strong id="terminate-dialog-title">终止并新建项目？</strong><span>会停止当前任务及其子进程，清空当前工作台并直接回到初始页面。已有文件和执行记录不会删除，之后仍可从历史任务重新打开。</span></div><button className="secondary-button" disabled={terminateBusy} onClick={() => setTerminateConfirmOpen(false)}>返回</button><button className="terminate-confirm-button" disabled={terminateBusy} onClick={terminateCurrentJob}>{terminateBusy ? "正在终止…" : "终止并新建"}</button></section></div>}
       {historyDialogOpen && <div className="history-job-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !historyJobBusy) setHistoryDialogOpen(false); }}><section className="history-job-dialog" role="dialog" aria-modal="true" aria-labelledby="history-job-title"><header><span><ClockCounterClockwise size={19} /></span><div><strong id="history-job-title">历史任务</strong><small>选择一条记录，查看八个环节、执行轨迹与 Token 消耗</small></div><button type="button" aria-label="关闭" disabled={historyJobBusy} onClick={() => setHistoryDialogOpen(false)}>×</button></header>{historyJobBusy && !historyJobs.length ? <div className="history-job-empty">正在读取历史任务…</div> : historyJobError ? <p role="alert">{historyJobError}</p> : historyJobs.length ? <div className="history-job-list">{historyJobs.map((item) => <button type="button" key={item.id} className={item.id === jobId ? "current" : ""} onClick={() => void openHistoricalJob(item.id)} disabled={historyJobBusy}><span className={`history-job-status ${item.status}`}>{item.status === "completed" ? "已完成" : item.status === "running" ? "进行中" : item.status === "blocked" ? "已阻塞" : item.status === "failed" ? "失败" : item.status === "cancelled" ? "已终止" : item.status}</span><div><strong>{item.source ? item.source.split(/[\\/]/).at(-1) : "未命名任务"}</strong><small>{item.id}</small></div><time>{item.updatedAt ? new Date(item.updatedAt).toLocaleString("zh-CN") : "时间未知"}</time><CaretRight size={16} /></button>)}</div> : <div className="history-job-empty">还没有历史任务</div>}<footer><small>最多显示最近 60 条本机任务</small><button type="button" className="secondary-button" disabled={historyJobBusy} onClick={() => setHistoryDialogOpen(false)}>关闭</button></footer></section></div>}
 
       {workspace === "prepare" && (

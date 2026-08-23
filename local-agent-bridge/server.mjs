@@ -2787,6 +2787,11 @@ function sanitizedConfig(config) {
   };
 }
 
+function usableResumeSecret(value) {
+  const text = String(value || "").trim();
+  return Boolean(text) && text !== "[provided at launch only]";
+}
+
 function buildPrompt(config, jobDirectory, context = {}) {
   const externalConsent = verifiedExternalProcessingConsent(config);
   const sitePolicies = {
@@ -2833,10 +2838,10 @@ function buildPrompt(config, jobDirectory, context = {}) {
     ] : [
       `本地听写要求: ${config.transcription?.provider === "whisper_cpp" ? "使用 whisper.cpp 与已下载 GGML 模型" : config.transcription?.provider === "openai_whisper" ? "使用 OpenAI Whisper 本地 CLI" : "优先使用 faster-whisper/CTranslate2"}；选择 ${config.transcription?.model || "turbo"}；启用 VAD、磁盘分块、重叠去重和 ${config.transcription?.beamSize || 5} 路束搜索。缺少运行库时明确阻塞并给出安装说明，不得悄悄改用翻译模型猜听写。`,
       ...(config.transcription?.provider === "faster_whisper" ? [
-        `Faster-Whisper 已由 Studio 预检。必须用 ${path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "transcribe_faster_whisper.py")} 执行真实听写，Python 路径从 PSS_TRANSCRIPTION_PYTHON 读取，模型缓存从 PSS_TRANSCRIPTION_MODEL_CACHE 读取；禁止重新安装、联网下载或用翻译模型编造原文。先用 FFmpeg 把媒体抽取成 16 kHz 单声道 FLAC 分块，再逐块调用脚本并合并到 ${path.join(jobDirectory, "work", "source-transcript.json")}。`,
+        `Faster-Whisper 已由 Studio 预检。必须通过 ${path.join(projectRoot, "harness", "precision-video-subtitles", "scripts", "transcribe_media.py")} 完成确定性的整段听写；它会创建目录、抽取磁盘音频、核对完整分块清单、只补听缺失块、偏移时间戳并原子写入 ${path.join(jobDirectory, "work", "source-transcript.json")}。Python 路径从 PSS_TRANSCRIPTION_PYTHON 读取，模型缓存从 PSS_TRANSCRIPTION_MODEL_CACHE 读取；禁止重新安装、联网下载、让聊天模型读取本地 JSON 后“合并”，或用模型文字冒充转写 JSON。Built-in Harness 会自动运行这条流水线，控制模型不得再手工调用 FFmpeg、transcribe 或寻找 chunks 目录。`,
       ] : []),
       ...(config.transcription?.diarization && diarizationEngine(config.transcription) === "sherpa_onnx" ? [
-        `本任务使用 Sherpa-ONNX 本地说话人分离。先把每个音频分块转为 16 kHz 单声道 PCM16 WAV，再用 PSS_TRANSCRIPTION_DIARIZATION_PYTHON 运行 PSS_TRANSCRIPTION_DIARIZATION_SCRIPT，传入 PSS_TRANSCRIPTION_DIARIZATION_SEGMENTATION_MODEL 与 PSS_TRANSCRIPTION_DIARIZATION_EMBEDDING_MODEL；结果写入 work/diarization.json 后按时间交叠回填匿名 speaker_XX。不得联网下载、不得把匿名簇直接命名为角色。`,
+        `本任务使用 Sherpa-ONNX 本地说话人分离。Built-in Harness 会在基础转写完成后逐个磁盘分块转为 16 kHz 单声道 PCM16 WAV，再以 PSS_TRANSCRIPTION_DIARIZATION_PYTHON、PSS_TRANSCRIPTION_DIARIZATION_SCRIPT、PSS_TRANSCRIPTION_DIARIZATION_SEGMENTATION_MODEL 与 PSS_TRANSCRIPTION_DIARIZATION_EMBEDDING_MODEL 执行有界分离，并按时间交叠回填匿名 speaker_XX。控制模型不得重复编排这组命令；不得联网下载、不得把匿名簇直接命名为角色。`,
       ] : []),
       ...(config.transcription?.diarization && diarizationEngine(config.transcription) === "pyannote" ? ["WhisperX / pyannote 位于独立环境。必须只使用 PSS_TRANSCRIPTION_DIARIZATION_PYTHON 调用对齐/聚类，不得在基础听写环境安装或修改依赖；匿名 speaker ID 必须结合已知声线、画面与自我介绍复核后才能映射角色名。"] : []),
       ...(config.transcription?.diarizationDegraded ? [`本任务启动预检已关闭说话人分离：${config.transcription.diarizationDegraded}。不得再次加载、下载或重试失败的分离引擎；基础听写照常进行，所有未确认说话人保留 speaker_unknown 并送入精修。`] : []),
@@ -3338,18 +3343,26 @@ async function recordedArtifactExists(directory, value, originalSource = "") {
 async function validateResumeManifest(directory, manifest, config) {
   const updated = structuredClone(manifest);
   const warnings = [];
+  const knownPhases = updated.phases && typeof updated.phases === "object" ? updated.phases : {};
+  const removedPhases = Object.keys(knownPhases).filter((id) => !phaseIds.includes(id));
+  updated.phases = Object.fromEntries(phaseIds.map((id) => [id, knownPhases[id] || { status: "pending", evidence: [] }]));
+  if (removedPhases.length) warnings.push(`已移除旧版或无效阶段：${removedPhases.join("、")}`);
   for (const id of phaseIds) {
     const phase = updated.phases?.[id];
     if (!["complete", "completed"].includes(workflowPhaseStatus(id, phase))) continue;
     const keys = phaseArtifactKeys[id] || [];
     const recorded = keys.filter((key) => updated.artifacts?.[key] != null);
     if (id === "acquire" && !recorded.length && updated.source?.acquired_media) recorded.push("__source");
-    if (!recorded.length) continue;
-    const checks = await Promise.all(recorded.map((key) => recordedArtifactExists(directory, key === "__source" ? updated.source.acquired_media : updated.artifacts[key], config.source)));
-    if (checks.every(Boolean)) continue;
+    const checks = recorded.length
+      ? await Promise.all(recorded.map((key) => recordedArtifactExists(directory, key === "__source" ? updated.source.acquired_media : updated.artifacts[key], config.source)))
+      : [];
+    if (recorded.length && checks.every(Boolean)) continue;
     phase.status = "pending";
-    phase.evidence = [...(Array.isArray(phase.evidence) ? phase.evidence : []), "断点续跑校验发现已登记产物缺失，本阶段将重新执行。"];
-    warnings.push(`${id} 的已登记产物缺失`);
+    const warning = recorded.length
+      ? "断点续跑校验发现已登记产物缺失，本阶段将重新执行。"
+      : "断点续跑校验发现阶段虽标为完成，但没有登记必要产物，本阶段将重新执行。";
+    phase.evidence = [...(Array.isArray(phase.evidence) ? phase.evidence : []), warning];
+    warnings.push(recorded.length ? `${id} 的已登记产物缺失` : `${id} 标为完成但没有登记必要产物`);
     const phaseIndex = phaseIds.indexOf(id);
     for (const later of phaseIds.slice(phaseIndex + 1)) {
       updated.phases[later] = { ...(updated.phases[later] || {}), status: "pending", evidence: [] };
@@ -3361,7 +3374,12 @@ async function validateResumeManifest(directory, manifest, config) {
     const start = phaseIds.indexOf(resumeFrom);
     for (const id of phaseIds.slice(start)) {
       const current = updated.phases?.[id] || { evidence: [] };
-      if (["blocked", "error", "in_progress", "running"].includes(String(current.status))) current.status = "pending";
+      if (["blocked", "error", "in_progress", "running"].includes(String(current.status))) {
+        current.status = "pending";
+        delete current.reason;
+        delete current.error;
+        delete current.blocking_reason;
+      }
       updated.phases[id] = current;
     }
   }
@@ -3387,6 +3405,9 @@ async function resumeJob(id, body) {
     transcription: { ...(stored.transcription || {}), ...(body.transcription || {}) },
     search: { ...(stored.search || {}), ...(body.search || {}) },
   };
+  if (config.engine?.mode === "api" && !usableResumeSecret(config.engine?.apiKey)) {
+    throw new Error("续跑历史任务需要由首页当前模型配置重新提供 API Key；本地任务文件只保存已提供标记，不保存可复用明文密钥。请从历史任务打开后点击‘从断点继续’。");
+  }
   const externalConsent = verifiedExternalProcessingConsent(config);
   const transcriptionCheck = await transcriptionEnvironment(config.transcription || {});
   if (!transcriptionCheck.ready) throw new Error(`听写环境尚未准备：${transcriptionCheck.recommendation}`);
@@ -3673,6 +3694,7 @@ async function jobStatus(id) {
   const manifestNotes = manifestPresentationNotes(manifest);
   return {
     ...effectiveState,
+    source: String(storedConfig.source || ""),
     phases,
     phaseDetails,
     reviewPolicy: manifest.review_policy || { ambiguities: "pragmatic" },

@@ -26,9 +26,9 @@
     mod
   ));
 
-  // node_modules/.pnpm/react@19.2.6/node_modules/react/cjs/react.development.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/cjs/react.development.js
   var require_react_development = __commonJS({
-    "node_modules/.pnpm/react@19.2.6/node_modules/react/cjs/react.development.js"(exports, module) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/cjs/react.development.js"(exports, module) {
       "use strict";
       (function() {
         function defineDeprecationWarning(methodName, info) {
@@ -998,9 +998,9 @@
     }
   });
 
-  // node_modules/.pnpm/react@19.2.6/node_modules/react/index.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/index.js
   var require_react = __commonJS({
-    "node_modules/.pnpm/react@19.2.6/node_modules/react/index.js"(exports, module) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/index.js"(exports, module) {
       "use strict";
       if (false) {
         module.exports = null;
@@ -1010,9 +1010,9 @@
     }
   });
 
-  // node_modules/.pnpm/scheduler@0.27.0/node_modules/scheduler/cjs/scheduler.development.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/scheduler@0.27.0/node_modules/scheduler/cjs/scheduler.development.js
   var require_scheduler_development = __commonJS({
-    "node_modules/.pnpm/scheduler@0.27.0/node_modules/scheduler/cjs/scheduler.development.js"(exports) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/scheduler@0.27.0/node_modules/scheduler/cjs/scheduler.development.js"(exports) {
       "use strict";
       (function() {
         function performWorkUntilDeadline() {
@@ -1269,9 +1269,9 @@
     }
   });
 
-  // node_modules/.pnpm/scheduler@0.27.0/node_modules/scheduler/index.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/scheduler@0.27.0/node_modules/scheduler/index.js
   var require_scheduler = __commonJS({
-    "node_modules/.pnpm/scheduler@0.27.0/node_modules/scheduler/index.js"(exports, module) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/scheduler@0.27.0/node_modules/scheduler/index.js"(exports, module) {
       "use strict";
       if (false) {
         module.exports = null;
@@ -1281,9 +1281,9 @@
     }
   });
 
-  // node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom.development.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom.development.js
   var require_react_dom_development = __commonJS({
-    "node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom.development.js"(exports) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom.development.js"(exports) {
       "use strict";
       (function() {
         function noop() {
@@ -1525,9 +1525,9 @@
     }
   });
 
-  // node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/index.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/index.js
   var require_react_dom = __commonJS({
-    "node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/index.js"(exports, module) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/index.js"(exports, module) {
       "use strict";
       if (false) {
         checkDCE();
@@ -1538,9 +1538,9 @@
     }
   });
 
-  // node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom-client.development.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom-client.development.js
   var require_react_dom_client_development = __commonJS({
-    "node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom-client.development.js"(exports) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/cjs/react-dom-client.development.js"(exports) {
       "use strict";
       (function() {
         function findHook(fiber, id) {
@@ -21437,9 +21437,9 @@
     }
   });
 
-  // node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/client.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/client.js
   var require_client = __commonJS({
-    "node_modules/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/client.js"(exports, module) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react-dom@19.2.6_react@19.2.6/node_modules/react-dom/client.js"(exports, module) {
       "use strict";
       if (false) {
         checkDCE();
@@ -21450,9 +21450,9 @@
     }
   });
 
-  // node_modules/.pnpm/react@19.2.6/node_modules/react/cjs/react-jsx-runtime.development.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/cjs/react-jsx-runtime.development.js
   var require_react_jsx_runtime_development = __commonJS({
-    "node_modules/.pnpm/react@19.2.6/node_modules/react/cjs/react-jsx-runtime.development.js"(exports) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/cjs/react-jsx-runtime.development.js"(exports) {
       "use strict";
       (function() {
         function getComponentNameFromType(type) {
@@ -21707,9 +21707,9 @@
     }
   });
 
-  // node_modules/.pnpm/react@19.2.6/node_modules/react/jsx-runtime.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/jsx-runtime.js
   var require_jsx_runtime = __commonJS({
-    "node_modules/.pnpm/react@19.2.6/node_modules/react/jsx-runtime.js"(exports, module) {
+    "../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/react@19.2.6/node_modules/react/jsx-runtime.js"(exports, module) {
       "use strict";
       if (false) {
         module.exports = null;
@@ -21726,7 +21726,7 @@
   // app/SubtitleStudio.tsx
   var import_react2 = __toESM(require_react(), 1);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/ArrowClockwise.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/ArrowClockwise.es.js
   var e = __toESM(require_react(), 1);
   var a = /* @__PURE__ */ new Map([
     [
@@ -21755,7 +21755,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/ArrowCounterClockwise.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/ArrowCounterClockwise.es.js
   var a2 = __toESM(require_react(), 1);
   var e2 = /* @__PURE__ */ new Map([
     [
@@ -21784,7 +21784,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Brain.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Brain.es.js
   var a3 = __toESM(require_react(), 1);
   var e3 = /* @__PURE__ */ new Map([
     [
@@ -21819,7 +21819,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/CaretRight.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/CaretRight.es.js
   var e4 = __toESM(require_react(), 1);
   var t = /* @__PURE__ */ new Map([
     [
@@ -21848,7 +21848,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/CheckCircle.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/CheckCircle.es.js
   var e5 = __toESM(require_react(), 1);
   var a4 = /* @__PURE__ */ new Map([
     [
@@ -21877,7 +21877,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/ClockCounterClockwise.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/ClockCounterClockwise.es.js
   var a5 = __toESM(require_react(), 1);
   var e6 = /* @__PURE__ */ new Map([
     [
@@ -21906,7 +21906,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/CursorClick.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/CursorClick.es.js
   var a6 = __toESM(require_react(), 1);
   var l = /* @__PURE__ */ new Map([
     [
@@ -21941,7 +21941,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/FilmStrip.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/FilmStrip.es.js
   var H = __toESM(require_react(), 1);
   var V = /* @__PURE__ */ new Map([
     [
@@ -21976,7 +21976,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/FloppyDisk.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/FloppyDisk.es.js
   var a7 = __toESM(require_react(), 1);
   var e7 = /* @__PURE__ */ new Map([
     [
@@ -22011,7 +22011,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/FolderOpen.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/FolderOpen.es.js
   var a8 = __toESM(require_react(), 1);
   var e8 = /* @__PURE__ */ new Map([
     [
@@ -22046,7 +22046,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Gauge.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Gauge.es.js
   var a9 = __toESM(require_react(), 1);
   var e9 = /* @__PURE__ */ new Map([
     [
@@ -22081,7 +22081,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Hand.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Hand.es.js
   var a10 = __toESM(require_react(), 1);
   var e10 = /* @__PURE__ */ new Map([
     [
@@ -22116,7 +22116,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/MagnifyingGlass.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/MagnifyingGlass.es.js
   var e11 = __toESM(require_react(), 1);
   var a11 = /* @__PURE__ */ new Map([
     [
@@ -22145,7 +22145,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Robot.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Robot.es.js
   var a12 = __toESM(require_react(), 1);
   var e12 = /* @__PURE__ */ new Map([
     [
@@ -22180,7 +22180,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/SlidersHorizontal.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/SlidersHorizontal.es.js
   var a13 = __toESM(require_react(), 1);
   var e13 = /* @__PURE__ */ new Map([
     [
@@ -22215,7 +22215,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Target.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Target.es.js
   var e14 = __toESM(require_react(), 1);
   var a14 = /* @__PURE__ */ new Map([
     [
@@ -22244,7 +22244,7 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Trash.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/defs/Trash.es.js
   var a15 = __toESM(require_react(), 1);
   var e15 = /* @__PURE__ */ new Map([
     [
@@ -22273,10 +22273,10 @@
     ]
   ]);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/lib/IconBase.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/lib/IconBase.es.js
   var e16 = __toESM(require_react(), 1);
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/lib/context.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/lib/context.es.js
   var import_react = __toESM(require_react(), 1);
   var o = (0, import_react.createContext)({
     color: "currentColor",
@@ -22285,7 +22285,7 @@
     mirrored: false
   });
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/lib/IconBase.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/lib/IconBase.es.js
   var p = e16.forwardRef(
     (s4, a19) => {
       const {
@@ -22325,103 +22325,103 @@
   );
   p.displayName = "IconBase";
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/ArrowClockwise.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/ArrowClockwise.es.js
   var o2 = __toESM(require_react(), 1);
   var r2 = o2.forwardRef((e23, c4) => /* @__PURE__ */ o2.createElement(p, { ref: c4, ...e23, weights: a }));
   r2.displayName = "ArrowClockwiseIcon";
   var m = r2;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/ArrowCounterClockwise.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/ArrowCounterClockwise.es.js
   var o3 = __toESM(require_react(), 1);
   var r3 = o3.forwardRef((e23, t4) => /* @__PURE__ */ o3.createElement(p, { ref: t4, ...e23, weights: e2 }));
   r3.displayName = "ArrowCounterClockwiseIcon";
   var i = r3;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Brain.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Brain.es.js
   var o4 = __toESM(require_react(), 1);
   var r4 = o4.forwardRef((a19, e23) => /* @__PURE__ */ o4.createElement(p, { ref: e23, ...a19, weights: e3 }));
   r4.displayName = "BrainIcon";
   var c = r4;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/CaretRight.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/CaretRight.es.js
   var t2 = __toESM(require_react(), 1);
   var e17 = t2.forwardRef((o17, r9) => /* @__PURE__ */ t2.createElement(p, { ref: r9, ...o17, weights: t }));
   e17.displayName = "CaretRightIcon";
   var s = e17;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/CheckCircle.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/CheckCircle.es.js
   var e18 = __toESM(require_react(), 1);
   var c2 = e18.forwardRef((o17, r9) => /* @__PURE__ */ e18.createElement(p, { ref: r9, ...o17, weights: a4 }));
   c2.displayName = "CheckCircleIcon";
   var s2 = c2;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/ClockCounterClockwise.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/ClockCounterClockwise.es.js
   var o5 = __toESM(require_react(), 1);
   var e19 = o5.forwardRef((c4, r9) => /* @__PURE__ */ o5.createElement(p, { ref: r9, ...c4, weights: e6 }));
   e19.displayName = "ClockCounterClockwiseIcon";
   var a16 = e19;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/CursorClick.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/CursorClick.es.js
   var o6 = __toESM(require_react(), 1);
   var r5 = o6.forwardRef((c4, e23) => /* @__PURE__ */ o6.createElement(p, { ref: e23, ...c4, weights: l }));
   r5.displayName = "CursorClickIcon";
   var m2 = r5;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/FilmStrip.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/FilmStrip.es.js
   var o7 = __toESM(require_react(), 1);
   var r6 = o7.forwardRef((t4, i2) => /* @__PURE__ */ o7.createElement(p, { ref: i2, ...t4, weights: V }));
   r6.displayName = "FilmStripIcon";
   var c3 = r6;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/FloppyDisk.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/FloppyDisk.es.js
   var o8 = __toESM(require_react(), 1);
   var p2 = o8.forwardRef((e23, r9) => /* @__PURE__ */ o8.createElement(p, { ref: r9, ...e23, weights: e7 }));
   p2.displayName = "FloppyDiskIcon";
   var m3 = p2;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/FolderOpen.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/FolderOpen.es.js
   var o9 = __toESM(require_react(), 1);
   var e20 = o9.forwardRef((r9, n5) => /* @__PURE__ */ o9.createElement(p, { ref: n5, ...r9, weights: e8 }));
   e20.displayName = "FolderOpenIcon";
   var m4 = e20;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Gauge.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Gauge.es.js
   var e21 = __toESM(require_react(), 1);
   var o10 = e21.forwardRef((a19, r9) => /* @__PURE__ */ e21.createElement(p, { ref: r9, ...a19, weights: e9 }));
   o10.displayName = "GaugeIcon";
   var n = o10;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Hand.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Hand.es.js
   var o11 = __toESM(require_react(), 1);
   var a17 = o11.forwardRef((e23, r9) => /* @__PURE__ */ o11.createElement(p, { ref: r9, ...e23, weights: e10 }));
   a17.displayName = "HandIcon";
   var s3 = a17;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/MagnifyingGlass.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/MagnifyingGlass.es.js
   var a18 = __toESM(require_react(), 1);
   var o12 = a18.forwardRef((s4, n5) => /* @__PURE__ */ a18.createElement(p, { ref: n5, ...s4, weights: a11 }));
   o12.displayName = "MagnifyingGlassIcon";
   var f = o12;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Robot.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Robot.es.js
   var o13 = __toESM(require_react(), 1);
   var t3 = o13.forwardRef((e23, r9) => /* @__PURE__ */ o13.createElement(p, { ref: r9, ...e23, weights: e12 }));
   t3.displayName = "RobotIcon";
   var n2 = t3;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/SlidersHorizontal.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/SlidersHorizontal.es.js
   var o14 = __toESM(require_react(), 1);
   var r7 = o14.forwardRef((e23, t4) => /* @__PURE__ */ o14.createElement(p, { ref: t4, ...e23, weights: e13 }));
   r7.displayName = "SlidersHorizontalIcon";
   var l2 = r7;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Target.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Target.es.js
   var e22 = __toESM(require_react(), 1);
   var o15 = e22.forwardRef((r9, t4) => /* @__PURE__ */ e22.createElement(p, { ref: t4, ...r9, weights: a14 }));
   o15.displayName = "TargetIcon";
   var n3 = o15;
 
-  // node_modules/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Trash.es.js
+  // ../../../../private/tmp/gakuniku-pnpm.2ncn8b/.pnpm/@phosphor-icons+react@2.1.10_react-dom@19.2.6_react@19.2.6__react@19.2.6/node_modules/@phosphor-icons/react/dist/csr/Trash.es.js
   var o16 = __toESM(require_react(), 1);
   var r8 = o16.forwardRef((a19, e23) => /* @__PURE__ */ o16.createElement(p, { ref: e23, ...a19, weights: e15 }));
   r8.displayName = "TrashIcon";
@@ -23148,6 +23148,7 @@
     const workflowStepRefs = (0, import_react2.useRef)({ engine: null, source: null, research: null, harness: null });
     const completedJobHydratedRef = (0, import_react2.useRef)("");
     const completedJobAutoOpenedRef = (0, import_react2.useRef)("");
+    const historicalJobViewRef = (0, import_react2.useRef)("");
     const sourceKind = detectSourceKind(source);
     const selectedCue = cues.find((cue) => cue.id === selectedCueId) ?? cues[0];
     const visibleCue = cues.find((cue) => currentTime >= cue.start && currentTime < cue.end);
@@ -23443,6 +23444,7 @@
           setManifestLimitations(Array.isArray(data.manifest?.limitations) ? data.manifest.limitations.map(String) : []);
           setManifestNotices(Array.isArray(data.manifest?.notices) ? data.manifest.notices.map(String) : []);
           setJobDiagnostics(data.diagnostics || null);
+          if (typeof data.source === "string" && data.source.trim()) setSource(data.source);
           if (Array.isArray(data.trace)) setTrace(data.trace);
           if (data.status === "completed") {
             setProgress(100);
@@ -23475,6 +23477,12 @@
             return;
           }
           if (data.status === "cancelled") {
+            if (historicalJobViewRef.current === jobId) {
+              setWorkspace("running");
+              setJobBlocker(data.blocker || null);
+              setRunError("");
+              return;
+            }
             returnHomeAfterTermination(data.message ?? "\u4EFB\u52A1\u5DF2\u7EC8\u6B62\uFF0C\u5DF2\u6709\u6210\u679C\u5DF2\u4FDD\u7559\uFF0C\u53EF\u4ECE\u5386\u53F2\u4EFB\u52A1\u4E2D\u91CD\u65B0\u6253\u5F00");
             return;
           }
@@ -24562,6 +24570,7 @@
         if (!response.ok) throw new Error(data.error ?? "\u4EFB\u52A1\u521B\u5EFA\u5931\u8D25");
         completedJobHydratedRef.current = "";
         completedJobAutoOpenedRef.current = "";
+        historicalJobViewRef.current = "";
         setJobId(data.id);
         setJobRunStatus("running");
         setActiveJobConsentFingerprint(taskExternalProcessingConsent?.fingerprint || "");
@@ -24576,6 +24585,7 @@
       if (!jobId) return;
       completedJobHydratedRef.current = "";
       completedJobAutoOpenedRef.current = "";
+      historicalJobViewRef.current = "";
       if (currentExternalProcessingPlan.required && !externalProcessingConsent && activeJobConsentFingerprint !== currentExternalProcessingPlan.fingerprint) {
         setWorkspace("prepare");
         focusPrepareStage("harness");
@@ -24631,6 +24641,8 @@
         if (!response.ok) throw new Error(data.error || "\u6CA1\u6709\u627E\u5230\u8FD9\u4E2A\u5386\u53F2\u4EFB\u52A1");
         completedJobHydratedRef.current = "";
         completedJobAutoOpenedRef.current = data.status === "completed" ? id : "";
+        historicalJobViewRef.current = id;
+        if (typeof data.source === "string" && data.source.trim()) setSource(data.source);
         setJobId(id);
         setJobRunStatus(["running", "blocked", "failed", "cancelled", "completed"].includes(data.status) ? data.status : "idle");
         setRunMessage(data.message || "\u6B63\u5728\u8F7D\u5165\u5386\u53F2\u4EFB\u52A1\u8BB0\u5F55");
@@ -24645,11 +24657,46 @@
     }
     function returnHomeAfterTermination(message) {
       window.localStorage.removeItem(ACTIVE_JOB_STORE);
+      window.localStorage.removeItem(LAST_JOB_STORE);
+      if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
+      videoRef.current?.pause();
       completedJobHydratedRef.current = "";
       completedJobAutoOpenedRef.current = "";
+      historicalJobViewRef.current = "";
       setJobId("");
       setJobRunStatus("idle");
       setWorkspace("prepare");
+      setCameraFocus("engine");
+      setSource("");
+      setPreviewUrl("");
+      setOutputPath("~/Movies/Precision Subtitles");
+      setFormats(["ass", "srt", "mkv"]);
+      setTranscriptionTestStage("idle");
+      setTranscriptionTestDetail("\u5C1A\u672A\u6D4B\u8BD5\uFF08\u53EF\u9009\uFF0C\u4E0D\u5F71\u54CD\u540E\u7EED\uFF09");
+      setTranscriptionTestResult(null);
+      setTranscriptionUploadConfirmed(false);
+      setTranscriptionCheckError("");
+      setTranscriptionInstallOpen(false);
+      setKeywords(["BanG Dream!", "MyGO!!!!!", "\u8FF7\u5B50\u96C6\u4F1A"]);
+      setKeywordDraft("");
+      setSelectedSites(["official", "wikipedia", "fandom", "video"]);
+      setCustomSites("");
+      setResearchPreview("");
+      setResearchStage("\u7B49\u5F85\u5F00\u59CB\u68C0\u7D22");
+      setResearchEvents([]);
+      setResearchOpen(false);
+      setKnowledgeOpen(false);
+      setKnowledgeIds([]);
+      setKnowledgeTitle("");
+      setHarnessOpen(false);
+      setHarnessText(harnessOriginal);
+      setDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS);
+      setConfirmedDeliveryConstraints(DEFAULT_DELIVERY_CONSTRAINTS);
+      setAmbiguityReviewMode("pragmatic");
+      setExternalConsentChecked(false);
+      setActiveJobConsentFingerprint("");
+      setTestOpen(false);
+      setHistoryDialogOpen(false);
       setTerminateConfirmOpen(false);
       setJobBlocker(null);
       setSelectedPhaseId("");
@@ -24665,7 +24712,25 @@
       setJobTokenUsage(emptyTokenUsage());
       setManifestLimitations([]);
       setManifestNotices([]);
-      setProjectNotice(message);
+      setRoles(initialRoles.map((role) => ({ ...role })));
+      setCues(initialCues.map((cue) => ({ ...cue })));
+      setSelectedCueId(1);
+      setCurrentTime(0);
+      setIsPlaying(false);
+      setTimelineZoom(56);
+      setTimelineTool("select");
+      setSearch("");
+      setOnlyFlagged(false);
+      setFontFamily("Noto Sans CJK SC");
+      setFontSize(42);
+      setFontWeight(700);
+      setOutline(3);
+      setGlow(8);
+      setShadow(3);
+      resetReviewHistory();
+      setSaved(true);
+      setProjectFileName("");
+      setProjectNotice(`${message}\uFF1B\u5DF2\u56DE\u5230\u65B0\u9879\u76EE\uFF0C\u539F\u4EFB\u52A1\u4ECD\u53EF\u4ECE\u5386\u53F2\u4EFB\u52A1\u6253\u5F00`);
     }
     async function terminateCurrentJob() {
       if (!jobId || terminateBusy) return;
@@ -24674,15 +24739,16 @@
       try {
         const response = await fetch(`${BRIDGE_URL}/api/jobs/${jobId}/cancel`, { method: "POST" });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "\u65E0\u6CD5\u7EC8\u6B62\u4EFB\u52A1");
-        if (["running", "blocked", "failed", "cancelled", "completed"].includes(data.status)) setJobRunStatus(data.status);
-        const message = data.message || "\u4EFB\u52A1\u5DF2\u7EC8\u6B62\uFF0C\u5DF2\u6709\u6210\u679C\u5DF2\u4FDD\u7559\uFF0C\u53EF\u4ECE\u5386\u53F2\u4EFB\u52A1\u4E2D\u91CD\u65B0\u6253\u5F00";
-        if (data.status === "cancelled") returnHomeAfterTermination(message);
-        else {
-          setRunMessage(message);
-          setTerminateConfirmOpen(false);
-          setJobPollRevision((value) => value + 1);
+        if (!response.ok) {
+          const missingJob = (response.status === 400 || response.status === 404) && String(data.error || "").includes("\u4EFB\u52A1\u4E0D\u5B58\u5728");
+          if (missingJob) {
+            returnHomeAfterTermination("\u5F53\u524D\u4EFB\u52A1\u8BB0\u5F55\u5DF2\u4E0D\u5B58\u5728");
+            return;
+          }
+          throw new Error(data.error || "\u65E0\u6CD5\u7EC8\u6B62\u4EFB\u52A1");
         }
+        const message = data.message || "\u4EFB\u52A1\u5DF2\u7EC8\u6B62";
+        returnHomeAfterTermination(message);
       } catch (error) {
         setRunError(error instanceof Error ? error.message : "\u65E0\u6CD5\u7EC8\u6B62\u4EFB\u52A1");
       } finally {
@@ -25016,11 +25082,11 @@
         if (event.target === event.currentTarget && !terminateBusy) setTerminateConfirmOpen(false);
       }, children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "terminate-confirm terminate-dialog", role: "alertdialog", "aria-modal": "true", "aria-labelledby": "terminate-dialog-title", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { id: "terminate-dialog-title", children: "\u786E\u8BA4\u7EC8\u6B62\u5F53\u524D\u4EFB\u52A1\uFF1F" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: jobRunStatus === "running" ? "\u4F1A\u7ACB\u5373\u505C\u6B62 Agent \u4E0E\u5176\u5B50\u8FDB\u7A0B\uFF0C\u4F46\u4E0D\u4F1A\u5220\u9664\u5DF2\u5B8C\u6210\u9636\u6BB5\u548C\u6587\u4EF6\uFF0C\u4E4B\u540E\u4ECD\u53EF\u65AD\u70B9\u7EE7\u7EED\u3002" : "\u65E0\u8BBA\u5F53\u524D\u5904\u4E8E\u963B\u585E\u3001\u5931\u8D25\u3001\u7CBE\u4FEE\u6216\u5176\u4ED6\u9875\u9762\uFF0C\u90FD\u53EF\u4EE5\u6267\u884C\u7EC8\u6B62\uFF1B\u5DF2\u7ECF\u5B8C\u6210\u6216\u7EC8\u6B62\u7684\u4EFB\u52A1\u53EA\u4F1A\u5B89\u5168\u786E\u8BA4\u72B6\u6001\u3002" })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("strong", { id: "terminate-dialog-title", children: "\u7EC8\u6B62\u5E76\u65B0\u5EFA\u9879\u76EE\uFF1F" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "\u4F1A\u505C\u6B62\u5F53\u524D\u4EFB\u52A1\u53CA\u5176\u5B50\u8FDB\u7A0B\uFF0C\u6E05\u7A7A\u5F53\u524D\u5DE5\u4F5C\u53F0\u5E76\u76F4\u63A5\u56DE\u5230\u521D\u59CB\u9875\u9762\u3002\u5DF2\u6709\u6587\u4EF6\u548C\u6267\u884C\u8BB0\u5F55\u4E0D\u4F1A\u5220\u9664\uFF0C\u4E4B\u540E\u4ECD\u53EF\u4ECE\u5386\u53F2\u4EFB\u52A1\u91CD\u65B0\u6253\u5F00\u3002" })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "secondary-button", disabled: terminateBusy, onClick: () => setTerminateConfirmOpen(false), children: "\u8FD4\u56DE" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "terminate-confirm-button", disabled: terminateBusy, onClick: terminateCurrentJob, children: terminateBusy ? "\u6B63\u5728\u7EC8\u6B62\u2026" : "\u786E\u8BA4\u7EC8\u6B62" })
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { className: "terminate-confirm-button", disabled: terminateBusy, onClick: terminateCurrentJob, children: terminateBusy ? "\u6B63\u5728\u7EC8\u6B62\u2026" : "\u7EC8\u6B62\u5E76\u65B0\u5EFA" })
       ] }) }),
       historyDialogOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "history-job-backdrop", role: "presentation", onMouseDown: (event) => {
         if (event.target === event.currentTarget && !historyJobBusy) setHistoryDialogOpen(false);

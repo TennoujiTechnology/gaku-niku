@@ -373,6 +373,13 @@ test("resume preserves completed phases and starts from the first blocked phase"
   await mkdir(path.join(jobDirectory, "logs"), { recursive: true });
   await mkdir(path.join(jobDirectory, "work"), { recursive: true });
   await writeFile(mediaPath, "fixture");
+  const researchArtifacts = {
+    research_brief: path.join(jobDirectory, "research", "brief.md"),
+    research_sources: path.join(jobDirectory, "research", "sources.md"),
+    research_glossary: path.join(jobDirectory, "research", "glossary.tsv"),
+    research_speakers: path.join(jobDirectory, "research", "speakers.tsv"),
+  };
+  await Promise.all(Object.values(researchArtifacts).map((file) => writeFile(file, "fixture\n")));
   await writeFile(path.join(jobDirectory, "job-state.json"), JSON.stringify({ id: jobId, status: "blocked", pid: 999_999_999, attempt: 1, createdAt: new Date().toISOString() }));
   await writeFile(path.join(jobDirectory, "studio-job.json"), JSON.stringify({
     source: mediaPath, outputPath: path.join(jobDirectory, "deliverables"), formats: ["srt"],
@@ -381,7 +388,7 @@ test("resume preserves completed phases and starts from the first blocked phase"
     search: { provider: "builtin" }, research: { keywords: ["fixture"], sites: [] }, execution: { showTrace: false },
   }));
   await writeFile(path.join(jobDirectory, "manifest.json"), JSON.stringify({
-    source: { kind: "local", value: mediaPath, acquired_media: mediaPath }, artifacts: { source_media: mediaPath }, limitations: [],
+    source: { kind: "local", value: mediaPath, acquired_media: mediaPath }, artifacts: { source_media: mediaPath, ...researchArtifacts }, limitations: [],
     phases: {
       acquire: { status: "complete", evidence: ["media validated"] },
       research: { status: "complete", evidence: ["research validated"] },
@@ -410,4 +417,61 @@ test("resume preserves completed phases and starts from the first blocked phase"
   assert.equal(status.phases.acquire, "done");
   assert.equal(status.phases.research, "done");
   assert.equal(status.externalProcessingConsent.granted, true);
+  const resumedManifest = JSON.parse(await readFile(path.join(jobDirectory, "manifest.json"), "utf8"));
+  assert.equal(resumedManifest.phases.source_transcript.reason, undefined);
+  assert.equal(resumedManifest.phases.source_transcript.error, undefined);
+});
+
+test("resume resets a completed phase that has no registered artifact", async (t) => {
+  const bridge = await startBridge();
+  t.after(() => bridge.child.kill());
+  const jobId = "2168d3a1-9e92-49f6-882b-5a4a56b9453a";
+  const jobDirectory = path.join(bridge.root, "jobs", jobId);
+  const mediaPath = path.join(jobDirectory, "source", "input.mp4");
+  const researchDirectory = path.join(jobDirectory, "research");
+  const workDirectory = path.join(jobDirectory, "work");
+  await mkdir(path.dirname(mediaPath), { recursive: true });
+  await mkdir(researchDirectory, { recursive: true });
+  await mkdir(path.join(jobDirectory, "logs"), { recursive: true });
+  await mkdir(workDirectory, { recursive: true });
+  await writeFile(mediaPath, "fixture");
+  const artifacts = {
+    source_media: mediaPath,
+    research_brief: path.join(researchDirectory, "brief.md"),
+    research_sources: path.join(researchDirectory, "sources.md"),
+    research_glossary: path.join(researchDirectory, "glossary.tsv"),
+    research_speakers: path.join(researchDirectory, "speakers.tsv"),
+    source_transcript: path.join(workDirectory, "source-transcript.json"),
+  };
+  await Promise.all(Object.values(artifacts).filter((file) => file !== mediaPath).map((file) => writeFile(file, "fixture\n")));
+  await writeFile(path.join(jobDirectory, "job-state.json"), JSON.stringify({ id: jobId, status: "blocked", pid: 999_999_999, attempt: 1, createdAt: new Date().toISOString() }));
+  await writeFile(path.join(jobDirectory, "studio-job.json"), JSON.stringify({
+    source: mediaPath, outputPath: path.join(jobDirectory, "deliverables"), formats: ["srt"],
+    engine: { mode: "cli", cli: "codex", model: "" },
+    transcription: { mode: "api", provider: "openai_audio", model: "gpt-4o-mini-transcribe", baseUrl: "https://api.example.test/v1", apiKey: "" },
+    search: { provider: "builtin" }, research: { keywords: ["fixture"], sites: [] }, execution: { showTrace: false },
+  }));
+  await writeFile(path.join(jobDirectory, "manifest.json"), JSON.stringify({
+    source: { kind: "local", value: mediaPath, acquired_media: mediaPath }, artifacts, limitations: [],
+    phases: {
+      acquire: { status: "complete", evidence: ["media"] }, research: { status: "complete", evidence: ["research"] }, source_transcript: { status: "complete", evidence: ["transcript"] },
+      translate: { status: "complete", evidence: ["claimed without output"] }, resolve_ambiguities: { status: "in_progress", evidence: [] },
+      subtitle_qc: { status: "pending", evidence: [] }, mux: { status: "pending", evidence: [] }, final_validation: { status: "pending", evidence: [] },
+    },
+  }));
+  const response = await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}/resume`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      transcription: { apiKey: "transcription-test-key" },
+      externalProcessingConsent: { version: 1, granted: true, grantedAt: new Date().toISOString(), currentTaskOnly: true, fingerprint: "transcription:openai_audio:gpt-4o-mini-transcribe:https://api.example.test" },
+    }),
+  });
+  assert.equal(response.status, 202);
+  const result = await response.json();
+  assert.equal(result.resumeFrom, "translate");
+  assert.ok(result.warnings.some((item) => /translate.*没有登记必要产物/.test(item)));
+  const resumed = JSON.parse(await readFile(path.join(jobDirectory, "manifest.json"), "utf8"));
+  assert.equal(resumed.phases.translate.status, "pending");
+  assert.equal(resumed.phases.resolve_ambiguities.status, "pending");
+  await fetch(`http://127.0.0.1:${bridge.port}/api/jobs/${jobId}/cancel`, { method: "POST" });
 });

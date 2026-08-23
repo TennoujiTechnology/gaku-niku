@@ -21,13 +21,13 @@ const baseMessages = Array.isArray(input.messages)
 if (!["openai", "xai", "deepseek", "kimi", "kimi_intl", "mimo", "glm"].includes(provider) && process.env.PSS_REASONING_EFFORT) {
   baseMessages.unshift({ role: "system", content: `思考强度偏好：${process.env.PSS_REASONING_EFFORT}。疑难专名与语境必须充分核证后回答。` });
 }
-const effort = process.env.PSS_REASONING_EFFORT || "medium";
+const effort = String(input.reasoningEffort || process.env.PSS_REASONING_EFFORT || "medium").toLowerCase();
 function reasoningFields() {
   if (provider === "openai") return { reasoning_effort: effort };
   if (provider === "xai") return { reasoning_effort: ["xhigh", "max"].includes(effort) ? "high" : effort };
   if (provider === "deepseek") return { thinking: { type: "enabled" }, reasoning_effort: ["xhigh", "max"].includes(effort) ? "max" : "high" };
   if (["kimi", "kimi_intl"].includes(provider)) return model.startsWith("kimi-k3") ? { reasoning_effort: effort === "low" ? "low" : ["xhigh", "max"].includes(effort) ? "max" : "high" } : { thinking: { type: "enabled" } };
-  if (provider === "mimo") return { thinking: { type: "enabled" } };
+  if (provider === "mimo") return { thinking: { type: effort === "low" ? "disabled" : "enabled" } };
   if (provider === "glm") return { thinking: { type: "enabled" }, reasoning_effort: effort === "xhigh" ? "max" : effort };
   return {};
 }
@@ -35,6 +35,44 @@ function tokenFields(maxTokens) {
   return ["openai", "kimi", "kimi_intl", "mimo"].includes(provider)
     ? { max_completion_tokens: maxTokens }
     : { max_tokens: maxTokens };
+}
+
+const harnessActionTool = {
+  type: "function",
+  function: {
+    name: "harness_action",
+    description: "Return the next bounded GakuNiku Harness action.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "summary"],
+      properties: {
+        type: { type: "string", enum: ["tool", "finish"] },
+        summary: { type: "string" },
+        calls: {
+          type: "array",
+          maxItems: 4,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["tool", "input"],
+            properties: {
+              tool: { type: "string" },
+              input: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+function structuredFields() {
+  if (input.responseFormat === "harness_action") {
+    return { tools: [harnessActionTool], tool_choice: { type: "function", function: { name: "harness_action" } } };
+  }
+  if (input.responseFormat === "json_object") return { response_format: { type: "json_object" } };
+  return {};
 }
 
 function extract(value) {
@@ -50,6 +88,41 @@ function extract(value) {
   if (Array.isArray(value.choices)) return extract(value.choices.map((choice) => choice.message || choice.delta));
   if (Array.isArray(value.output)) return extract(value.output);
   return "";
+}
+
+function extractToolArguments(value) {
+  const call = value?.choices?.[0]?.message?.tool_calls?.find((item) => item?.function?.name === "harness_action")
+    || value?.choices?.[0]?.message?.tool_calls?.[0];
+  const args = call?.function?.arguments;
+  if (typeof args === "string") return args;
+  if (args && typeof args === "object") return JSON.stringify(args);
+  return "";
+}
+
+function responseDiagnostic(data, responseText, response = null) {
+  const choice = data?.choices?.[0] || {};
+  const message = choice?.message || {};
+  const reasoning = extract(message?.reasoning_content || message?.reasoning || data?.reasoning_content).trim();
+  return {
+    at: new Date().toISOString(),
+    provider,
+    model: data?.model || model,
+    httpStatus: response?.status || null,
+    finishReason: String(choice?.finish_reason || data?.stop_reason || data?.finish_reason || "unknown"),
+    usage: data?.usage || null,
+    responseKeys: data && typeof data === "object" ? Object.keys(data).slice(0, 30) : [],
+    messageKeys: message && typeof message === "object" ? Object.keys(message).slice(0, 30) : [],
+    reasoningExcerpt: reasoning.slice(0, 1200),
+    rawExcerpt: String(responseText || "").slice(0, 2000),
+  };
+}
+
+async function persistFailure(code, message, diagnostic = {}) {
+  const payload = { ok: false, code, message: String(message || code).slice(0, 4000), ...diagnostic };
+  await writeFile(`${outputPath}.error.json`, `${JSON.stringify(payload, null, 2)}\n`, "utf8").catch(() => {});
+  const error = new Error(`${code}: ${payload.message}`);
+  error.code = code;
+  throw error;
 }
 
 function tokenUsage(value) {
@@ -86,19 +159,38 @@ function mergeUsage(...values) {
 }
 
 async function requestModel(messages, maxTokens) {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, ...(provider === "mimo" ? { "api-key": apiKey } : {}), "content-type": "application/json" },
-    body: JSON.stringify({ model, messages, stream: false, ...reasoningFields(), ...tokenFields(maxTokens) }),
-    signal: AbortSignal.timeout(Number(input.timeoutMs || 120_000)),
-    ...(proxyUrl ? { dispatcher: new ProxyAgent(proxyUrl) } : {}),
-  });
-  const responseText = await response.text();
-  let data;
-  try { data = JSON.parse(responseText); } catch { data = { raw: responseText.slice(0, 4000) }; }
-  if (!response.ok) throw new Error(data?.error?.message || data?.base_resp?.status_msg || `API HTTP ${response.status}`);
-  const text = extract(data).trim();
-  if (!text) throw new Error("模型没有返回文本");
+  async function send(includeStructured) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, ...(provider === "mimo" ? { "api-key": apiKey } : {}), "content-type": "application/json" },
+        body: JSON.stringify({ model, messages, stream: false, ...reasoningFields(), ...tokenFields(maxTokens), ...(includeStructured ? structuredFields() : {}) }),
+        signal: AbortSignal.timeout(Number(input.timeoutMs || 120_000)),
+        ...(proxyUrl ? { dispatcher: new ProxyAgent(proxyUrl) } : {}),
+      });
+      const responseText = await response.text();
+      let data;
+      try { data = JSON.parse(responseText); } catch { data = { raw: responseText.slice(0, 4000) }; }
+      return { response, responseText, data };
+    } catch (error) {
+      const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError" || /timeout/i.test(String(error?.message || error));
+      return persistFailure(timedOut ? "MODEL_TIMEOUT" : "MODEL_NETWORK_ERROR", error?.message || String(error), {
+        at: new Date().toISOString(), provider, model,
+      });
+    }
+  }
+
+  let attempt = await send(true);
+  const structuredError = String(attempt.data?.error?.message || attempt.data?.base_resp?.status_msg || attempt.responseText || "");
+  const canFallback = Boolean(input.responseFormat)
+    && [400, 404, 422].includes(attempt.response.status)
+    && /tool|function|schema|response.?format|unsupported|unknown (?:field|parameter)/i.test(structuredError);
+  if (canFallback) attempt = await send(false);
+  const { response, responseText, data } = attempt;
+  const diagnostic = { ...responseDiagnostic(data, responseText, response), structuredFallback: canFallback };
+  if (!response.ok) return persistFailure("MODEL_HTTP_ERROR", data?.error?.message || data?.base_resp?.status_msg || `API HTTP ${response.status}`, diagnostic);
+  const text = (extractToolArguments(data) || extract(data)).trim();
+  if (!text) return persistFailure("MODEL_EMPTY_RESPONSE", "模型请求成功，但没有返回可执行的正文内容", diagnostic);
   return {
     text,
     model: data.model || model,
