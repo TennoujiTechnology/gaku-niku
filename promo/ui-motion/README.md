@@ -2,7 +2,7 @@
 
 这是“操作界面逻辑宣传片”的动态重制版。画面基于真实产品界面，加入连续推拉镜头、鼠标轨迹、控件高亮、阶段扫描和节奏化转场。
 
-成片不再纳入源码仓库，可从 [GakuNiku v0.2.3 Release](https://github.com/TennoujiTechnology/gaku-niku/releases/tag/v0.2.3) 下载 `自学型熟肉机-动态操作宣传片.mp4`，并使用同一 Release 中的 `PROMO_SHA256SUMS.txt` 校验。
+成片不纳入源码仓库或产品 Release；需要时在本地运行下方脚本生成 `自学型熟肉机-动态操作宣传片.mp4`。
 
 ## 重新生成
 

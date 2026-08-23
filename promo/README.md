@@ -1,6 +1,6 @@
 # 自学型熟肉机 · 30 秒介绍片
 
-成片不再纳入源码仓库，可从 [GakuNiku v0.2.3 Release](https://github.com/TennoujiTechnology/gaku-niku/releases/tag/v0.2.3) 下载 `自学型熟肉机-30s介绍.mp4`，并使用同一 Release 中的 `PROMO_SHA256SUMS.txt` 校验。
+成片不纳入源码仓库或产品 Release；需要时在本地运行下方脚本生成 `自学型熟肉机-30s介绍.mp4`。
 
 ## 规格
 

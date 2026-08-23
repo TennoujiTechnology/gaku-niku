@@ -43,7 +43,7 @@ yarn-error.log*
 /work/
 /.precision-subtitle-studio/
 
-# promo render cache and raw desktop captures
+# promo render cache and locally generated media
 /promo/render/
 /promo/*.mp4
 /promo/SHA256SUMS.txt
